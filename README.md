@@ -32,6 +32,13 @@ Compose.
 - Tool orchestration layer for `search_project_docs`, `extract_requirements`,
   `evaluate_requirements`, `generate_traceability`, `generate_test_cases`, and
   `create_issue_ticket`
+- Multi-source retrieval across project documents, requirements, traceability,
+  test cases, evaluation history, and agent run logs
+- Precision review module with reranked evidence, confidence scoring, candidate
+  standard references, compressed context, and human review queue
+- Per-run answer engine selection: OpenAI, local Ollama-compatible model, or
+  deterministic evidence synthesis with no LLM
+- Workflow tracking board for safety-review follow-up actions
 - Mock integrations for GitHub issues, Jira-style tickets, CRM-like updates,
   and Slack-style notifications
 - Evaluation dashboard metrics for success rate, escalation rate, latency,
@@ -45,6 +52,18 @@ Create project -> Upload documents -> Extract and chunk text -> Store
 project-filtered embeddings -> Ask safety or requirements questions -> Generate
 structured analysis -> Extract and evaluate requirements -> Build traceability
 matrix -> Generate test cases -> Export reports.
+
+## Architecture Decks
+
+Two recruiter-facing PowerPoint decks are included under `presentations/`:
+
+```text
+presentations/Project_2_Architecture_Agentic_Document_AI_Platform.pptx
+presentations/Project_1_Project_2_Interaction_Architecture.pptx
+```
+
+They explain the backend architecture of this platform and how it complements
+the first Autonomous Driving Safety Analyst project.
 
 ## Demo Dataset
 
@@ -75,19 +94,49 @@ Recommended data strategy:
 - reuse the first project's safety standards as optional context, not as the
   main requirements label dataset
 
+The repository also includes a converted requirements dataset example under
+`converted_dataset/requirements_markdown/`. These files were converted from
+public XML requirements documents with:
+
+```bash
+python scripts/convert_requirements_xml.py download_dataset --output-dir converted_dataset/requirements_markdown
+```
+
+The raw `download_dataset/` folder is intentionally not required for the app.
+Use the converted Markdown files for upload demos.
+
+## Railway Safety Demo Framing
+
+This project can be tailored to railway workflows when licensed railway
+standards and project documents are available. For public portfolio demos, it
+is safer to use railway requirements datasets and public educational context as
+review material, not as official compliance evidence.
+
+Recommended wording:
+
+```text
+The platform can be tailored to railway safety and cybersecurity standards
+when licensed standards documents are available. Public railway RAMS lecture
+transcripts are used only as educational context, not official standard text.
+```
+
 ## Main Endpoints
 
 ```text
 POST /projects
 GET  /projects
 GET  /projects/{project_id}
+DELETE /projects/{project_id}
 POST /projects/{project_id}/documents
 GET  /projects/{project_id}/documents
 POST /projects/{project_id}/query
 POST /projects/{project_id}/safety-analysis
 POST /projects/{project_id}/requirements/extract
 POST /projects/{project_id}/requirements/generate
+POST /projects/{project_id}/requirements/generate-from-standards
 POST /projects/{project_id}/requirements/evaluate
+POST /projects/{project_id}/retrieval/search
+POST /projects/{project_id}/analysis/precision-review
 GET  /projects/{project_id}/traceability
 POST /projects/{project_id}/test-cases/generate
 GET  /projects/{project_id}/evaluation-runs
@@ -102,6 +151,11 @@ POST /projects/{project_id}/integrations/jira-ticket
 POST /projects/{project_id}/integrations/slack-notification
 POST /projects/{project_id}/integrations/mock
 GET  /projects/{project_id}/integrations
+POST /projects/{project_id}/workflow/items
+GET  /projects/{project_id}/workflow/items
+PATCH /projects/{project_id}/workflow/items/{item_id}
+DELETE /projects/{project_id}/workflow/items/{item_id}
+GET  /projects/{project_id}/workflow/dashboard
 GET  /projects/{project_id}/report
 ```
 
@@ -150,6 +204,24 @@ If `OPENAI_API_KEY` is set, the backend uses OpenAI embeddings and answer
 generation. Without a key, it falls back to deterministic local hash embeddings
 and evidence-based draft answers, which keeps tests and demos runnable.
 
+Run the Streamlit frontend in a second terminal:
+
+```bash
+streamlit run streamlit_app.py --server.port 8501 --server.address 127.0.0.1
+```
+
+Open:
+
+```text
+http://127.0.0.1:8501
+```
+
+In the **Ask** tab, users can choose the answer engine and model per run:
+
+- OpenAI model, for example `gpt-4o-mini`
+- local Ollama-compatible model, for example `qwen2.5:7b-instruct`
+- deterministic evidence synthesis, which uses no LLM
+
 ## Run With Docker Compose
 
 ```bash
@@ -169,7 +241,9 @@ http://127.0.0.1:8000/docs
 {
   "question": "Are the requirements complete for occluded pedestrian detection at night?",
   "standards": ["ISO 26262", "ISO 21448", "ISO 8800"],
-  "include_requirements_review": true
+  "include_requirements_review": true,
+  "answer_mode": "openai",
+  "answer_model": "gpt-4o-mini"
 }
 ```
 

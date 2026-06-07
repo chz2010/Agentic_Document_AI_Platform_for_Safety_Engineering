@@ -115,6 +115,113 @@ def extract_requirements_from_text(text: str, evidence_source: str | None = None
     return requirements
 
 
+def generate_requirements_from_standards(
+    standards: list[str],
+    domain: str = "Autonomous driving",
+    system_type: str = "ADAS",
+) -> list[Requirement]:
+    """Create reviewable starter requirements mapped to candidate ISO clause areas."""
+    selected = {standard.lower() for standard in standards}
+    templates: list[dict[str, str]] = []
+    if any("26262" in standard for standard in selected):
+        templates.extend(
+            [
+                {
+                    "id": "REQ-ISO26262-HARA-001",
+                    "type": RequirementType.functional_safety_requirement.value,
+                    "text": f"The {system_type} safety case shall define HARA-derived hazardous events for the declared ODD, including severity, exposure, controllability, and ASIL classification, and verify completeness during safety review.",
+                    "hazard": "HZ-ISO26262-001",
+                    "safety_goal": "SG-ISO26262-001",
+                    "source": "ISO 26262-3:2018 Clause 6 candidate reference: hazard analysis and risk assessment",
+                },
+                {
+                    "id": "REQ-ISO26262-FSC-001",
+                    "type": RequirementType.functional_safety_requirement.value,
+                    "text": f"The {system_type} system shall define functional safety goals and safe-state behavior for each ASIL-relevant hazardous event within the ODD and verify traceability from hazard to safety goal.",
+                    "hazard": "HZ-ISO26262-001",
+                    "safety_goal": "SG-ISO26262-001",
+                    "source": "ISO 26262-3:2018 Clause 7 candidate reference: functional safety concept",
+                },
+                {
+                    "id": "REQ-ISO26262-TSC-001",
+                    "type": RequirementType.technical_safety_requirement.value,
+                    "text": f"The {system_type} architecture shall allocate technical safety requirements to system elements with diagnostic coverage targets and verification evidence for fault detection within 100 ms where applicable.",
+                    "hazard": "HZ-ISO26262-002",
+                    "safety_goal": "SG-ISO26262-002",
+                    "source": "ISO 26262-4:2018 Clause 6 and Clause 7 candidate reference: technical safety concept and system architectural design",
+                },
+                {
+                    "id": "REQ-ISO26262-VALID-001",
+                    "type": RequirementType.validation_requirement.value,
+                    "text": f"The {system_type} validation plan shall verify safety goals through scenario tests, fault-injection tests, and recorded evidence across nominal and boundary ODD conditions with pass/fail criteria.",
+                    "hazard": "HZ-ISO26262-003",
+                    "safety_goal": "SG-ISO26262-003",
+                    "source": "ISO 26262-4:2018 Clause 9 candidate reference: safety validation",
+                },
+            ]
+        )
+    if any("21448" in standard or "sotif" in standard for standard in selected):
+        templates.extend(
+            [
+                {
+                    "id": "REQ-ISO21448-SOTIF-001",
+                    "type": RequirementType.safety_requirement.value,
+                    "text": f"The {system_type} system shall identify reasonably foreseeable misuse, performance limitations, and triggering conditions for the declared ODD and document mitigation evidence before release.",
+                    "hazard": "HZ-SOTIF-001",
+                    "safety_goal": "SG-SOTIF-001",
+                    "source": "ISO 21448:2022 Clause 6 candidate reference: SOTIF specification and design considerations",
+                },
+                {
+                    "id": "REQ-ISO21448-TRIG-001",
+                    "type": RequirementType.validation_requirement.value,
+                    "text": f"The {system_type} evaluation shall include scenario tests for known triggering conditions such as low light, occlusion, adverse weather, and unusual pedestrian behavior, with measurable detection and response criteria.",
+                    "hazard": "HZ-SOTIF-002",
+                    "safety_goal": "SG-SOTIF-002",
+                    "source": "ISO 21448:2022 Clause 7 candidate reference: evaluation of triggering conditions",
+                },
+            ]
+        )
+    if any("8800" in standard for standard in selected):
+        templates.extend(
+            [
+                {
+                    "id": "REQ-ISO8800-DATA-001",
+                    "type": RequirementType.dataset_requirement.value,
+                    "text": f"The {system_type} AI dataset shall define ODD coverage, data provenance, labeling quality checks, class balance targets above 95% review completion, and validation evidence for safety-relevant scenarios.",
+                    "hazard": "HZ-AI-001",
+                    "safety_goal": "SG-AI-001",
+                    "source": "ISO 8800 candidate reference: AI safety lifecycle, data assurance, and validation clause area",
+                },
+                {
+                    "id": "REQ-ISO8800-MON-001",
+                    "type": RequirementType.monitoring_requirement.value,
+                    "text": f"The {system_type} AI runtime shall monitor model confidence, ODD exits, sensor degradation, and safety-relevant prediction uncertainty every 100 ms and trigger a documented fallback strategy when thresholds are violated.",
+                    "hazard": "HZ-AI-002",
+                    "safety_goal": "SG-AI-002",
+                    "source": "ISO 8800 candidate reference: AI monitoring, operational controls, and safety assurance clause area",
+                },
+            ]
+        )
+
+    requirements: list[Requirement] = []
+    for template in templates:
+        score, issues, improvement = score_requirement(template["text"], template["hazard"], template["safety_goal"])
+        requirements.append(
+            Requirement(
+                id=template["id"],
+                type=RequirementType(template["type"]),
+                text=template["text"],
+                linked_hazard=template["hazard"],
+                linked_safety_goal=template["safety_goal"],
+                quality_score=score.overall,
+                quality_issues=issues,
+                suggested_improvement=improvement if issues else f"Review project-specific thresholds and ODD assumptions for {domain}.",
+                evidence_source=template["source"],
+            )
+        )
+    return requirements
+
+
 def quality_summary(requirements: list[Requirement]) -> dict:
     if not requirements:
         return {"count": 0, "average_quality_score": 0.0, "common_issues": []}

@@ -9,6 +9,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from backend.models import AgentRunLogRecord, IntegrationEventRecord, RequirementRecord, TestCaseRecord
+from backend.retrieval_tools import search_project_docs
 from backend.schemas import AgentApprovalUpdate, AgentOperationsDashboard, AgentRunLogCreate, IntegrationEventCreate
 
 
@@ -22,6 +23,10 @@ def estimate_cost_usd(token_usage: dict[str, Any], input_per_million: float = 0.
     input_tokens = int(token_usage.get("prompt_tokens") or token_usage.get("input_tokens") or 0)
     output_tokens = int(token_usage.get("completion_tokens") or token_usage.get("output_tokens") or 0)
     return round((input_tokens / 1_000_000 * input_per_million) + (output_tokens / 1_000_000 * output_per_million), 6)
+
+
+def output_token_count(token_usage: dict[str, Any]) -> int:
+    return int(token_usage.get("completion_tokens") or token_usage.get("output_tokens") or 0)
 
 
 def infer_governance_flags(
@@ -118,8 +123,10 @@ def create_integration_event(project_id: int, payload: IntegrationEventCreate, s
     return record
 
 
-def build_operations_dashboard(project_id: int, session: Session) -> AgentOperationsDashboard:
+def build_operations_dashboard(project_id: int, session: Session, source_system: str | None = None) -> AgentOperationsDashboard:
     runs = session.exec(select(AgentRunLogRecord).where(AgentRunLogRecord.project_id == project_id)).all()
+    if source_system:
+        runs = [run for run in runs if (run.run_metadata or {}).get("source_system") == source_system]
     total = len(runs)
     if not runs:
         return AgentOperationsDashboard(
@@ -130,6 +137,8 @@ def build_operations_dashboard(project_id: int, session: Session) -> AgentOperat
             average_latency_ms=0.0,
             average_cost_usd=0.0,
             total_cost_usd=0.0,
+            average_output_tokens=0.0,
+            total_output_tokens=0,
             approval_pending_count=0,
             hallucination_flags={},
             average_evaluation_score=None,
@@ -138,6 +147,7 @@ def build_operations_dashboard(project_id: int, session: Session) -> AgentOperat
     escalation_count = sum(1 for run in runs if run.human_escalation_required)
     costs = [run.estimated_cost_usd for run in runs]
     latencies = [run.latency_ms for run in runs]
+    output_tokens = [output_token_count(run.token_usage) for run in runs]
     scores = [run.evaluation_score for run in runs if run.evaluation_score is not None]
     flags: dict[str, int] = {}
     for run in runs:
@@ -151,6 +161,8 @@ def build_operations_dashboard(project_id: int, session: Session) -> AgentOperat
         average_latency_ms=round(mean(latencies), 2),
         average_cost_usd=round(mean(costs), 6),
         total_cost_usd=round(sum(costs), 6),
+        average_output_tokens=round(mean(output_tokens), 2),
+        total_output_tokens=sum(output_tokens),
         approval_pending_count=sum(1 for run in runs if run.approval_status == "pending"),
         hallucination_flags=flags,
         average_evaluation_score=round(mean(scores), 3) if scores else None,
@@ -159,7 +171,13 @@ def build_operations_dashboard(project_id: int, session: Session) -> AgentOperat
 
 def run_mock_tool(tool_name: str, project_id: int, user_request: str, session: Session) -> Any:
     if tool_name == "search_project_docs":
-        return {"query": user_request, "retrieved_docs": []}
+        return {
+            "query": user_request,
+            "retrieved_docs": [
+                result.model_dump(mode="json")
+                for result in search_project_docs(project_id, user_request, top_k=5)
+            ],
+        }
     if tool_name == "extract_requirements":
         count = len(session.exec(select(RequirementRecord).where(RequirementRecord.project_id == project_id)).all())
         return {"requirements_found": count}

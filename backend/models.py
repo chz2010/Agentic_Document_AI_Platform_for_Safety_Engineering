@@ -134,3 +134,26 @@ class IntegrationEventRecord(SQLModel, table=True):
     status: str = Field(default="created", index=True)
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkflowItemRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int = Field(index=True, foreign_key="project.id")
+    title: str
+    description: str | None = None
+    source_system: str = Field(default="autonomous_driving_safety_analyst", index=True)
+    workflow_stage: str = Field(default="intake", index=True)
+    status: str = Field(default="open", index=True)
+    priority: str = Field(default="medium", index=True)
+    owner: str | None = None
+    due_date: datetime | None = None
+    linked_requirement_id: str | None = Field(default=None, index=True)
+    linked_hazard_id: str | None = Field(default=None, index=True)
+    linked_safety_goal_id: str | None = Field(default=None, index=True)
+    linked_agent_run_id: int | None = Field(default=None, index=True, foreign_key="agentrunlogrecord.id")
+    linked_evaluation_run_id: int | None = Field(default=None, index=True, foreign_key="evaluationrunrecord.id")
+    evidence_refs: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    acceptance_criteria: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

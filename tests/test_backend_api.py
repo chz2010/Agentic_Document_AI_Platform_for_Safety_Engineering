@@ -7,6 +7,10 @@ def test_health_and_project_create_list():
     with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200
+        health = response.json()
+        assert health["status"] == "ok"
+        assert health["answer_mode"] in {"none", "openai", "local"}
+        assert health["answer_model"]
 
         create_response = client.post(
             "/projects",
@@ -26,9 +30,26 @@ def test_health_and_project_create_list():
         assert any(project["id"] == project_id for project in list_response.json())
 
 
+def test_project_delete_removes_project_from_workspace():
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "Temporary Delete Project", "domain": "QA", "system_type": "Cleanup"},
+        ).json()
+
+        delete_response = client.delete(f"/projects/{project['id']}")
+        assert delete_response.status_code == 200
+        assert delete_response.json()["status"] == "deleted"
+
+        list_response = client.get("/projects")
+        assert list_response.status_code == 200
+        assert all(item["id"] != project["id"] for item in list_response.json())
+
+
 def test_upload_extract_query_and_traceability_csv():
     settings.openai_api_key = ""
     settings.use_openai_generation = False
+    settings.answer_mode = "none"
     content = (
         "REQ-AEB-101: The AEB system shall detect partially occluded pedestrians at night "
         "within 40 m below 50 km/h and verify the result by scenario test evidence."
@@ -56,16 +77,102 @@ def test_upload_extract_query_and_traceability_csv():
             json={"question": "Is night occlusion covered?", "include_requirements_review": True},
         )
         assert query.status_code == 200
+        assert query.json()["answer_mode"] == "none"
+        assert query.json()["answer_model"] == "deterministic-evidence-synthesis"
+        assert "## Evidence reviewed" in query.json()["answer"]
+        assert "## Recommended next actions" in query.json()["answer"]
         assert query.json()["retrieved_sources"]
         runs = client.get(f"/projects/{project['id']}/agent-runs")
         assert runs.status_code == 200
         assert runs.json()[0]["operation_name"] == "project_query"
+        assert runs.json()[0]["source_system"] == "autonomous_driving_safety_analyst"
+        assert runs.json()[0]["model_used"] == "deterministic-evidence-synthesis"
+        assert runs.json()[0]["token_usage"]["completion_tokens"] > 0
         assert runs.json()[0]["prompt_version"] == "query-answer-v1"
         assert runs.json()[0]["evaluation_score"] is not None
+
+        source_dashboard = client.get(
+            f"/projects/{project['id']}/agent-operations/dashboard?source_system=autonomous_driving_safety_analyst"
+        )
+        assert source_dashboard.status_code == 200
+        assert source_dashboard.json()["total_output_tokens"] > 0
 
         csv_response = client.get(f"/projects/{project['id']}/traceability?format=csv")
         assert csv_response.status_code == 200
         assert "hazard_id,hazard_description,safety_goal_id,requirement_id" in csv_response.text
+
+
+def test_query_can_select_local_answer_engine_without_running_local_model():
+    settings.openai_api_key = ""
+    settings.use_openai_generation = False
+    settings.answer_mode = "none"
+
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "Local Engine Selection", "domain": "ADAS", "system_type": "AEB"},
+        ).json()
+
+        client.post(
+            f"/projects/{project['id']}/documents",
+            files={
+                "file": (
+                    "local_engine_requirements.txt",
+                    "REQ-AEB-301: The AEB system shall detect pedestrians and verify detection by scenario testing.",
+                    "text/plain",
+                )
+            },
+        )
+
+        query = client.post(
+            f"/projects/{project['id']}/query",
+            json={
+                "question": "Is pedestrian detection covered?",
+                "answer_mode": "local",
+                "answer_model": "mistral:7b",
+            },
+        )
+
+        assert query.status_code == 200
+        assert query.json()["answer_mode"] == "local"
+        assert query.json()["answer_model"] == "mistral:7b"
+        assert query.json()["retrieved_sources"]
+
+
+def test_generate_requirements_from_iso_standards():
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={
+                "name": "ISO Starter Requirements",
+                "domain": "Autonomous driving",
+                "system_type": "AEB pedestrian detection",
+                "standards_scope": ["ISO 26262", "ISO 21448", "ISO 8800"],
+            },
+        ).json()
+
+        generated = client.post(
+            f"/projects/{project['id']}/requirements/generate-from-standards",
+            json={
+                "standards": ["ISO 26262", "ISO 21448", "ISO 8800"],
+                "replace_existing": True,
+            },
+        )
+
+        assert generated.status_code == 200
+        body = generated.json()
+        ids = {requirement["id"] for requirement in body["requirements"]}
+        assert "REQ-ISO26262-HARA-001" in ids
+        assert "REQ-ISO21448-SOTIF-001" in ids
+        assert "REQ-ISO8800-DATA-001" in ids
+        assert all(requirement["linked_hazard"] for requirement in body["requirements"])
+        assert all(requirement["linked_safety_goal"] for requirement in body["requirements"])
+        assert any("Clause 6" in requirement["evidence_source"] for requirement in body["requirements"])
+
+        traceability = client.get(f"/projects/{project['id']}/traceability")
+        assert traceability.status_code == 200
+        assert len(traceability.json()) == len(body["requirements"])
+        assert any("ISO 26262" in row["evidence_source"] for row in traceability.json())
 
 
 def test_agent_operations_log_cost_failure_escalation_and_approval():
@@ -123,6 +230,11 @@ def test_agent_operations_log_cost_failure_escalation_and_approval():
         filtered = client.get(f"/projects/{project['id']}/agent-runs?approval_status=approved")
         assert filtered.status_code == 200
         assert len(filtered.json()) == 1
+
+        dashboard = client.get(f"/projects/{project['id']}/agent-operations/dashboard")
+        assert dashboard.status_code == 200
+        assert dashboard.json()["total_output_tokens"] == 500
+        assert dashboard.json()["average_output_tokens"] == 500.0
 
 
 def test_tool_orchestration_integrations_and_dashboard():
@@ -191,3 +303,184 @@ def test_tool_orchestration_integrations_and_dashboard():
         assert metrics["escalation_rate"] == 1.0
         assert metrics["approval_pending_count"] == 1
         assert metrics["hallucination_flags"]["high_hallucination_risk"] == 1
+
+        backend_dashboard = client.get(
+            f"/projects/{project['id']}/agent-operations/dashboard?source_system=agentic_document_ai_platform"
+        )
+        assert backend_dashboard.status_code == 200
+        assert backend_dashboard.json()["total_runs"] == 1
+        first_project_dashboard = client.get(
+            f"/projects/{project['id']}/agent-operations/dashboard?source_system=autonomous_driving_safety_analyst"
+        )
+        assert first_project_dashboard.status_code == 200
+        assert first_project_dashboard.json()["total_runs"] == 0
+
+
+def test_autonomous_safety_analyst_workflow_tracking():
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "First Project Workflow", "domain": "ADAS", "system_type": "Autonomous Driving Safety Analyst"},
+        ).json()
+
+        bootstrapped = client.post(f"/projects/{project['id']}/workflow/bootstrap-autonomous-safety-analyst")
+        assert bootstrapped.status_code == 200
+        items = bootstrapped.json()
+        assert len(items) == 6
+        assert items[0]["source_system"] == "autonomous_driving_safety_analyst"
+        assert any(item["workflow_stage"] == "evidence_retrieval" for item in items)
+
+        dashboard = client.get(f"/projects/{project['id']}/workflow/dashboard")
+        assert dashboard.status_code == 200
+        body = dashboard.json()
+        assert body["total_items"] == 6
+        assert body["open_items"] == 6
+        assert body["completion_rate"] == 0.0
+
+        created = client.post(
+            f"/projects/{project['id']}/workflow/items",
+            json={
+                "title": "Manual evidence review",
+                "source_system": "autonomous_driving_safety_analyst",
+                "workflow_stage": "quality_review",
+                "status": "in_progress",
+                "priority": "critical",
+                "linked_requirement_id": "REQ-ISO26262-HARA-001",
+                "acceptance_criteria": ["Evidence source reviewed", "Decision recorded"],
+            },
+        )
+        assert created.status_code == 200
+        created_body = created.json()
+        assert created_body["priority"] == "critical"
+
+        updated = client.patch(
+            f"/projects/{project['id']}/workflow/items/{created_body['id']}",
+            json={"status": "done", "owner": "safety_engineer", "notes": "Reviewed and accepted."},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["status"] == "done"
+        assert updated.json()["owner"] == "safety_engineer"
+
+        filtered = client.get(f"/projects/{project['id']}/workflow/items?status=done")
+        assert filtered.status_code == 200
+        assert any(item["id"] == created_body["id"] for item in filtered.json())
+
+        generic = client.post(
+            f"/projects/{project['id']}/workflow/items",
+            json={
+                "title": "Generic backend workflow item",
+                "source_system": "agentic_document_ai_platform",
+                "workflow_stage": "intake",
+            },
+        )
+        assert generic.status_code == 200
+        source_filtered = client.get(
+            f"/projects/{project['id']}/workflow/items?source_system=agentic_document_ai_platform"
+        )
+        assert len(source_filtered.json()) == 1
+        source_dashboard = client.get(
+            f"/projects/{project['id']}/workflow/dashboard?source_system=agentic_document_ai_platform"
+        )
+        assert source_dashboard.json()["total_items"] == 1
+
+        deleted = client.delete(f"/projects/{project['id']}/workflow/items/{generic.json()['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json()["status"] == "deleted"
+        after_delete = client.get(
+            f"/projects/{project['id']}/workflow/items?source_system=agentic_document_ai_platform"
+        )
+        assert after_delete.status_code == 200
+        assert after_delete.json() == []
+
+
+def test_multi_retrieval_search_across_project_sources():
+    content = (
+        "REQ-AEB-201: The AEB system shall detect occluded pedestrians at night "
+        "within 35 m and verify the result with scenario test evidence. "
+        "Linked hazard HZ-AEB-201 and linked safety goal SG-AEB-201."
+    )
+
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "Multi Retrieval Project", "domain": "ADAS", "system_type": "AEB"},
+        ).json()
+
+        upload = client.post(
+            f"/projects/{project['id']}/documents",
+            files={"file": ("multi_retrieval_requirements.txt", content, "text/plain")},
+        )
+        assert upload.status_code == 200
+
+        extracted = client.post(f"/projects/{project['id']}/requirements/extract")
+        assert extracted.status_code == 200
+        assert extracted.json()["requirements"]
+
+        test_cases = client.post(f"/projects/{project['id']}/test-cases/generate")
+        assert test_cases.status_code == 200
+        assert test_cases.json()
+
+        query = client.post(
+            f"/projects/{project['id']}/query",
+            json={"question": "Find night occluded pedestrian evidence", "include_requirements_review": True},
+        )
+        assert query.status_code == 200
+
+        orchestration = client.post(
+            f"/projects/{project['id']}/agent-tools/run",
+            json={
+                "user_request": "Search for night occluded pedestrian evidence.",
+                "tools": ["search_project_docs"],
+                "confidence_score": 0.9,
+                "hallucination_risk": "low",
+            },
+        )
+        assert orchestration.status_code == 200
+        assert orchestration.json()["tool_results"]["search_project_docs"]["retrieved_docs"]
+
+        response = client.post(
+            f"/projects/{project['id']}/retrieval/search",
+            json={
+                "query": "night occluded pedestrian evidence",
+                "tools": [
+                    "project_docs",
+                    "requirements",
+                    "traceability",
+                    "test_cases",
+                    "evaluation_runs",
+                    "agent_runs",
+                ],
+                "top_k": 3,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_results"] >= 6
+        assert body["results_by_tool"]["project_docs"]
+        assert body["results_by_tool"]["requirements"][0]["title"] == "REQ-AEB-201"
+        assert body["results_by_tool"]["traceability"]
+        assert body["results_by_tool"]["test_cases"]
+        assert body["results_by_tool"]["evaluation_runs"]
+        assert body["results_by_tool"]["agent_runs"]
+
+        review = client.post(
+            f"/projects/{project['id']}/analysis/precision-review",
+            json={
+                "query": "Is night occluded pedestrian detection supported by evidence and ISO clauses?",
+                "top_k": 5,
+                "standards": ["ISO 26262", "ISO 21448", "ISO 8800"],
+            },
+        )
+
+        assert review.status_code == 200
+        review_body = review.json()
+        assert "requirements" in review_body["routed_tools"]
+        assert review_body["reranked_evidence"]
+        assert review_body["citations"]
+        assert review_body["compressed_context"]
+        assert review_body["requirement_completeness"][0]["requirement_id"] == "REQ-AEB-201"
+        assert review_body["human_review_queue"]
+        assert review_body["iso_references"]
+        assert any(reference["standard"].startswith("ISO 26262") for reference in review_body["iso_references"])
+        assert 0.0 <= review_body["confidence_score"] <= 1.0

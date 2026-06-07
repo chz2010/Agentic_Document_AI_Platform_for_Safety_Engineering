@@ -97,6 +97,11 @@ class RequirementExtractionResponse(BaseModel):
     quality_summary: dict[str, Any] = Field(default_factory=dict)
 
 
+class RequirementGenerateFromStandardsRequest(BaseModel):
+    standards: list[str] = Field(default_factory=lambda: ["ISO 26262", "ISO 21448", "ISO 8800"])
+    replace_existing: bool = False
+
+
 class TraceabilityLink(BaseModel):
     hazard_id: str | None = None
     hazard_description: str | None = None
@@ -134,6 +139,8 @@ class QueryRequest(BaseModel):
     question: str
     standards: list[str] = Field(default_factory=list)
     include_requirements_review: bool = False
+    answer_mode: str | None = Field(default=None, description="Optional per-run answer mode: openai, local, or none.")
+    answer_model: str | None = Field(default=None, description="Optional per-run model name for OpenAI or local model engines.")
 
 
 class QueryResponse(BaseModel):
@@ -142,6 +149,90 @@ class QueryResponse(BaseModel):
     missing_requirements: list[str] = Field(default_factory=list)
     recommended_requirements: list[Requirement] = Field(default_factory=list)
     evaluation_run_id: int | None = None
+    answer_mode: str | None = None
+    answer_model: str | None = None
+
+
+class RetrievalSearchRequest(BaseModel):
+    query: str
+    tools: list[str] = Field(default_factory=lambda: [
+        "project_docs",
+        "requirements",
+        "traceability",
+        "test_cases",
+        "evaluation_runs",
+        "agent_runs",
+    ])
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class RetrievalResult(BaseModel):
+    source: str
+    title: str
+    snippet: str
+    score: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RetrievalSearchResponse(BaseModel):
+    query: str
+    tools_used: list[str]
+    results_by_tool: dict[str, list[RetrievalResult]]
+    total_results: int
+
+
+class StandardReference(BaseModel):
+    standard: str
+    clause: str
+    topic: str
+    rationale: str
+    confidence: float = 0.0
+    source: str = "heuristic_clause_mapping"
+
+
+class EvidenceCitation(BaseModel):
+    source: str
+    title: str
+    citation: str
+    snippet: str
+    score: float = 0.0
+    iso_references: list[StandardReference] = Field(default_factory=list)
+
+
+class RequirementCompletenessItem(BaseModel):
+    requirement_id: str
+    quality_score: float
+    missing_fields: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    iso_references: list[StandardReference] = Field(default_factory=list)
+
+
+class HumanReviewItem(BaseModel):
+    item_type: str
+    item_id: str
+    reason: str
+    severity: str = "medium"
+    suggested_action: str
+
+
+class PrecisionReviewRequest(BaseModel):
+    query: str
+    tools: list[str] | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+    standards: list[str] = Field(default_factory=lambda: ["ISO 26262", "ISO 21448", "ISO 8800"])
+
+
+class PrecisionReviewResponse(BaseModel):
+    query: str
+    routed_tools: list[str]
+    reranked_evidence: list[RetrievalResult]
+    citations: list[EvidenceCitation]
+    compressed_context: list[str]
+    requirement_completeness: list[RequirementCompletenessItem]
+    human_review_queue: list[HumanReviewItem]
+    iso_references: list[StandardReference]
+    confidence_score: float
+    confidence_rationale: str
 
 
 class RequirementEvaluateRequest(BaseModel):
@@ -208,6 +299,7 @@ class AgentRunLogRead(AgentRunLogCreate):
     id: int
     agent_run_id: int
     project_id: int
+    source_system: str | None = None
     approval_status: str
     created_at: datetime
     updated_at: datetime
@@ -272,6 +364,66 @@ class AgentOperationsDashboard(BaseModel):
     average_latency_ms: float
     average_cost_usd: float
     total_cost_usd: float
+    average_output_tokens: float = 0.0
+    total_output_tokens: int = 0
     approval_pending_count: int
     hallucination_flags: dict[str, int]
     average_evaluation_score: float | None = None
+
+
+class WorkflowItemCreate(BaseModel):
+    title: str
+    description: str | None = None
+    source_system: str = "autonomous_driving_safety_analyst"
+    workflow_stage: str = "intake"
+    status: str = "open"
+    priority: str = "medium"
+    owner: str | None = None
+    due_date: datetime | None = None
+    linked_requirement_id: str | None = None
+    linked_hazard_id: str | None = None
+    linked_safety_goal_id: str | None = None
+    linked_agent_run_id: int | None = None
+    linked_evaluation_run_id: int | None = None
+    evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class WorkflowItemUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    workflow_stage: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    owner: str | None = None
+    due_date: datetime | None = None
+    linked_requirement_id: str | None = None
+    linked_hazard_id: str | None = None
+    linked_safety_goal_id: str | None = None
+    linked_agent_run_id: int | None = None
+    linked_evaluation_run_id: int | None = None
+    evidence_refs: list[dict[str, Any]] | None = None
+    acceptance_criteria: list[str] | None = None
+    notes: str | None = None
+
+
+class WorkflowItemRead(WorkflowItemCreate):
+    id: int
+    project_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowDashboard(BaseModel):
+    project_id: int
+    total_items: int
+    open_items: int
+    in_progress_items: int
+    blocked_items: int
+    done_items: int
+    completion_rate: float
+    by_stage: dict[str, int]
+    by_status: dict[str, int]
+    by_priority: dict[str, int]
+    overdue_items: int
