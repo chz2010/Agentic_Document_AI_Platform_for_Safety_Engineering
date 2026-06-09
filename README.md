@@ -25,6 +25,9 @@ Compose.
 - Structured Pydantic outputs for safety analysis and requirements engineering
 - Requirement extraction, classification, and quality scoring
 - Traceability matrix and test-case generation
+- Lightweight traceability knowledge graph connecting projects, documents,
+  evidence, requirements, hazards, safety goals, test cases, workflow items,
+  evaluation runs, and agent runs
 - Evaluation run history for MLOps-style monitoring
 - Agent operations module with run logs, cost tracking, failure reasons,
   human escalation flags, approval gates, evaluation scores, and prompt/version
@@ -51,7 +54,7 @@ Compose.
 Create project -> Upload documents -> Extract and chunk text -> Store
 project-filtered embeddings -> Ask safety or requirements questions -> Generate
 structured analysis -> Extract and evaluate requirements -> Build traceability
-matrix -> Generate test cases -> Export reports.
+matrix and knowledge graph -> Generate test cases -> Export reports.
 
 ## Architecture Decks
 
@@ -138,6 +141,7 @@ POST /projects/{project_id}/requirements/evaluate
 POST /projects/{project_id}/retrieval/search
 POST /projects/{project_id}/analysis/precision-review
 GET  /projects/{project_id}/traceability
+GET  /projects/{project_id}/knowledge-graph
 POST /projects/{project_id}/test-cases/generate
 GET  /projects/{project_id}/evaluation-runs
 POST /projects/{project_id}/agent-runs

@@ -19,6 +19,7 @@ from backend.agent_operations import build_operations_dashboard, create_agent_ru
 from backend.analysis_intelligence import build_precision_review
 from backend.database import get_session, init_db
 from backend.document_processing import chunk_documents, extract_documents
+from backend.knowledge_graph import build_project_knowledge_graph
 from backend.models import AgentRunLogRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, Project, ProjectDocument, RequirementRecord, TestCaseRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
@@ -32,6 +33,7 @@ from backend.schemas import (
     EvaluationRun,
     IntegrationEventCreate,
     IntegrationEventRead,
+    KnowledgeGraphResponse,
     ProjectCreate,
     ProjectRead,
     PrecisionReviewRequest,
@@ -404,6 +406,28 @@ def get_traceability(project_id: int, format: str = Query(default="json", patter
     if format == "csv":
         return PlainTextResponse(traceability_csv(rows), media_type="text/csv")
     return rows
+
+
+@app.get("/projects/{project_id}/knowledge-graph", response_model=KnowledgeGraphResponse)
+def get_knowledge_graph(project_id: int, session: Session = Depends(get_session)) -> KnowledgeGraphResponse:
+    project = _project_or_404(project_id, session)
+    requirements = _stored_requirements(project_id, session)
+    traceability = build_traceability(requirements)
+    documents = session.exec(select(ProjectDocument).where(ProjectDocument.project_id == project_id)).all()
+    test_cases = session.exec(select(TestCaseRecord).where(TestCaseRecord.project_id == project_id)).all()
+    workflow_items = session.exec(select(WorkflowItemRecord).where(WorkflowItemRecord.project_id == project_id)).all()
+    evaluation_runs = session.exec(select(EvaluationRunRecord).where(EvaluationRunRecord.project_id == project_id)).all()
+    agent_runs = session.exec(select(AgentRunLogRecord).where(AgentRunLogRecord.project_id == project_id)).all()
+    return build_project_knowledge_graph(
+        project=project,
+        documents=documents,
+        requirements=requirements,
+        traceability=traceability,
+        test_cases=test_cases,
+        workflow_items=workflow_items,
+        evaluation_runs=evaluation_runs,
+        agent_runs=agent_runs,
+    )
 
 
 @app.post("/projects/{project_id}/test-cases/generate", response_model=list[TestCase])

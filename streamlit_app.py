@@ -1473,6 +1473,218 @@ def render_traceability(project: dict[str, Any]) -> None:
     st.download_button("Download traceability CSV", csv_text, "traceability_matrix.csv", "text/csv")
 
 
+def render_knowledge_graph(project: dict[str, Any]) -> None:
+    st.subheader("Traceability Knowledge Graph")
+    graph = api_request("GET", f"/projects/{project['id']}/knowledge-graph")
+    summary = graph.get("coverage_summary", {})
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+
+    st.markdown(
+        "<div class='grafana-hero'>"
+        "<div class='grafana-kicker'>Generated graph view</div>"
+        "<div class='grafana-title'>Project evidence, requirements, tests, workflow, and evaluations</div>"
+        "<div class='grafana-subtitle'>"
+        "This graph is generated from the platform database. It shows how documents and evidence connect to requirements, "
+        "hazards, safety goals, test cases, workflow items, evaluation runs, and agent runs."
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    metric_cols = st.columns(6)
+    with metric_cols[0]:
+        grafana_stat("Nodes", graph.get("node_count", 0), "Graph entities")
+    with metric_cols[1]:
+        grafana_stat("Edges", graph.get("edge_count", 0), "Relationships")
+    with metric_cols[2]:
+        grafana_stat("Requirements", summary.get("requirements_total", 0), "Stored requirements")
+    with metric_cols[3]:
+        grafana_stat("Hazard coverage", f"{summary.get('hazard_link_coverage', 0.0):.0%}", "Reqs linked to hazard")
+    with metric_cols[4]:
+        grafana_stat("Test coverage", f"{summary.get('test_case_link_coverage', 0.0):.0%}", "Reqs linked to tests")
+    with metric_cols[5]:
+        grafana_stat("Density", summary.get("graph_density", 0.0), "Edges per node")
+
+    if not nodes:
+        st.info("No graph data yet. Upload a document, extract requirements, and generate test cases to populate the graph.")
+        return
+
+    st.markdown("<div class='grafana-panel-title'>Relationship map</div>", unsafe_allow_html=True)
+    render_graph_chart(nodes, edges)
+
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        node_type_rows = [{"type": key, "count": value} for key, value in summary.get("node_types", {}).items()]
+        horizontal_bar_chart(node_type_rows, "count", "type", "Node Type Distribution", x_title="Count", y_title="Node type")
+    with chart_cols[1]:
+        edge_type_rows = [{"relationship": key, "count": value} for key, value in summary.get("edge_types", {}).items()]
+        horizontal_bar_chart(edge_type_rows, "count", "relationship", "Relationship Distribution", x_title="Count", y_title="Relationship")
+
+    st.markdown("#### Graph Entities")
+    node_rows = [
+        {
+            "id": node.get("id"),
+            "label": node.get("label"),
+            "type": node.get("type"),
+            "group": node.get("group"),
+            "metadata": node.get("metadata", {}),
+        }
+        for node in nodes
+    ]
+    wrapped_table(
+        node_rows,
+        ["id", "label", "type", "group", "metadata"],
+        labels={"id": "Node ID", "label": "Label", "type": "Type", "group": "Group", "metadata": "Metadata"},
+        widths={"id": "col-medium", "label": "col-medium", "type": "col-small", "group": "col-small", "metadata": "col-text"},
+    )
+
+    st.markdown("#### Graph Relationships")
+    edge_rows = [
+        {
+            "source": edge.get("source"),
+            "relationship": edge.get("relationship"),
+            "target": edge.get("target"),
+            "metadata": edge.get("metadata", {}),
+        }
+        for edge in edges
+    ]
+    wrapped_table(
+        edge_rows,
+        ["source", "relationship", "target", "metadata"],
+        labels={"source": "Source", "relationship": "Relationship", "target": "Target", "metadata": "Metadata"},
+        widths={"source": "col-medium", "relationship": "col-medium", "target": "col-medium", "metadata": "col-text"},
+    )
+
+
+def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    layer_order = {
+        "project": 0,
+        "document": 1,
+        "evidence": 1,
+        "hazard": 2,
+        "safety_goal": 3,
+        "requirement": 4,
+        "test_case": 5,
+        "workflow_item": 6,
+        "evaluation_run": 6,
+        "agent_run": 6,
+    }
+    sorted_nodes = sorted(nodes, key=lambda node: (layer_order.get(node.get("type", ""), 8), node.get("label", "")))
+    nodes_by_type: dict[str, list[dict[str, Any]]] = {}
+    for node in sorted_nodes:
+        nodes_by_type.setdefault(node.get("type", "other"), []).append(node)
+
+    positioned_nodes: list[dict[str, Any]] = []
+    for node_type, typed_nodes in nodes_by_type.items():
+        x_position = layer_order.get(node_type, 8)
+        count = len(typed_nodes)
+        for index, node in enumerate(typed_nodes, start=1):
+            y_position = index / (count + 1)
+            positioned_nodes.append(
+                {
+                    "id": node.get("id"),
+                    "label": node.get("label"),
+                    "type": node_type,
+                    "x": x_position,
+                    "y": y_position,
+                    "size": 220 if node_type == "project" else 120,
+                }
+            )
+
+    nodes_frame = pd.DataFrame(positioned_nodes)
+    node_lookup = nodes_frame.set_index("id")[["x", "y", "label", "type"]].to_dict("index") if not nodes_frame.empty else {}
+    edge_rows = []
+    for edge in edges:
+        source = node_lookup.get(edge.get("source"))
+        target = node_lookup.get(edge.get("target"))
+        if not source or not target:
+            continue
+        edge_rows.append(
+            {
+                "source": edge.get("source"),
+                "target": edge.get("target"),
+                "relationship": edge.get("relationship"),
+                "source_x": source["x"],
+                "source_y": source["y"],
+                "target_x": target["x"],
+                "target_y": target["y"],
+            }
+        )
+
+    if nodes_frame.empty:
+        st.info("No graph nodes available.")
+        return
+
+    edges_frame = pd.DataFrame(edge_rows)
+    base_width = alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4]))
+    base_height = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[0, 1]))
+    edge_chart = (
+        alt.Chart(edges_frame)
+        .mark_rule(color="#566274", opacity=0.55)
+        .encode(
+            x=alt.X("source_x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4])),
+            y=alt.Y("source_y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+            x2="target_x:Q",
+            y2="target_y:Q",
+            tooltip=["source", "relationship", "target"],
+        )
+        if not edges_frame.empty
+        else alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_rule()
+    )
+    node_chart = (
+        alt.Chart(nodes_frame)
+        .mark_circle(stroke="#ffffff", strokeWidth=1.2, opacity=0.95)
+        .encode(
+            x=base_width,
+            y=base_height,
+            size=alt.Size("size:Q", legend=None),
+            color=alt.Color("type:N", legend=alt.Legend(title="Node type")),
+            tooltip=["id", "label", "type"],
+        )
+    )
+    label_chart = (
+        alt.Chart(nodes_frame)
+        .mark_text(dy=-14, fontSize=11, color="#f5f7fb", limit=130)
+        .encode(
+            x=base_width,
+            y=base_height,
+            text="label:N",
+            tooltip=["id", "label", "type"],
+        )
+    )
+    layer_labels = pd.DataFrame(
+        [
+            {"x": value, "y": 1.04, "label": label}
+            for label, value in [
+                ("Project", 0),
+                ("Evidence", 1),
+                ("Hazard", 2),
+                ("Safety Goal", 3),
+                ("Requirement", 4),
+                ("Test", 5),
+                ("Operations", 6),
+            ]
+        ]
+    )
+    layer_chart = (
+        alt.Chart(layer_labels)
+        .mark_text(fontSize=12, fontWeight="bold", color="#aab4c3")
+        .encode(
+            x=alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4])),
+            y=alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[0, 1.08])),
+            text="label:N",
+        )
+    )
+    chart = (
+        (edge_chart + node_chart + label_chart + layer_chart)
+        .properties(height=520)
+        .configure_view(strokeWidth=0)
+        .configure_legend(labelColor="#cbd5e1", titleColor="#f5f7fb")
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
 def render_agent_ops(project: dict[str, Any]) -> None:
     st.subheader("Agent Operations")
     source_options = {
@@ -2070,7 +2282,19 @@ if project:
         f"Standards: {', '.join(project.get('standards_scope', []))}</div>",
         unsafe_allow_html=True,
     )
-    tabs = st.tabs(["Overview", "Documents", "Ask", "Retrieval", "Precision", "Requirements", "Traceability", "Workflow", "Agent Ops", "Reports"])
+    tabs = st.tabs([
+        "Overview",
+        "Documents",
+        "Ask",
+        "Retrieval",
+        "Precision",
+        "Requirements",
+        "Traceability",
+        "Knowledge Graph",
+        "Workflow",
+        "Agent Ops",
+        "Reports",
+    ])
     with tabs[0]:
         render_overview(project)
     with tabs[1]:
@@ -2086,8 +2310,10 @@ if project:
     with tabs[6]:
         render_traceability(project)
     with tabs[7]:
-        render_workflow(project)
+        render_knowledge_graph(project)
     with tabs[8]:
-        render_agent_ops(project)
+        render_workflow(project)
     with tabs[9]:
+        render_agent_ops(project)
+    with tabs[10]:
         render_reports(project)

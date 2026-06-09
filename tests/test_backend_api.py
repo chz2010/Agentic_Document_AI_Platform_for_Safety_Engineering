@@ -174,6 +174,34 @@ def test_generate_requirements_from_iso_standards():
         assert len(traceability.json()) == len(body["requirements"])
         assert any("ISO 26262" in row["evidence_source"] for row in traceability.json())
 
+        test_cases = client.post(f"/projects/{project['id']}/test-cases/generate")
+        assert test_cases.status_code == 200
+        assert test_cases.json()
+
+        workflow_item = client.post(
+            f"/projects/{project['id']}/workflow/items",
+            json={
+                "title": "Review ISO starter requirement",
+                "workflow_stage": "requirements_engineering",
+                "linked_requirement_id": "REQ-ISO26262-HARA-001",
+                "linked_hazard_id": "HZ-ISO26262-001",
+                "linked_safety_goal_id": "SG-ISO26262-001",
+            },
+        )
+        assert workflow_item.status_code == 200
+
+        graph = client.get(f"/projects/{project['id']}/knowledge-graph")
+        assert graph.status_code == 200
+        graph_body = graph.json()
+        node_types = {node["type"] for node in graph_body["nodes"]}
+        edge_relationships = {edge["relationship"] for edge in graph_body["edges"]}
+        assert graph_body["node_count"] > len(body["requirements"])
+        assert {"project", "requirement", "hazard", "safety_goal", "test_case", "workflow_item"}.issubset(node_types)
+        assert {"contains_requirement", "linked_hazard", "linked_safety_goal", "verified_by", "tracks_requirement"}.issubset(edge_relationships)
+        assert graph_body["coverage_summary"]["hazard_link_coverage"] == 1.0
+        assert graph_body["coverage_summary"]["safety_goal_link_coverage"] == 1.0
+        assert graph_body["coverage_summary"]["test_case_link_coverage"] == 1.0
+
 
 def test_agent_operations_log_cost_failure_escalation_and_approval():
     with TestClient(app) as client:

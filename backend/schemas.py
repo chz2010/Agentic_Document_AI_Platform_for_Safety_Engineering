@@ -115,6 +115,31 @@ class TraceabilityLink(BaseModel):
     quality_score: float
 
 
+class KnowledgeGraphNode(BaseModel):
+    id: str
+    label: str
+    type: str
+    group: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeGraphEdge(BaseModel):
+    source: str
+    target: str
+    relationship: str
+    label: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeGraphResponse(BaseModel):
+    project_id: int
+    nodes: list[KnowledgeGraphNode]
+    edges: list[KnowledgeGraphEdge]
+    node_count: int
+    edge_count: int
+    coverage_summary: dict[str, Any] = Field(default_factory=dict)
+
+
 class TestCase(BaseModel):
     id: str
     scenario: str
