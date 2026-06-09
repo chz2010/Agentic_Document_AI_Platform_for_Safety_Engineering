@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from langchain_core.documents import Document as LangchainDocument
 from openai import OpenAI
@@ -64,6 +65,14 @@ app = FastAPI(
     title="Agentic Document AI Platform for Safety Engineering API",
     version="0.1.0",
     description="Agentic Document AI and requirements engineering backend for safety engineering workflows.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

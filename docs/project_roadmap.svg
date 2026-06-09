@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic Document AI Platform roadmap</title>
+  <desc id="desc">Visual milestone roadmap showing completed platform foundations, current validation work, next improvements, and long-term production roadmap.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050810"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <style>
+      .title { font: 800 42px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .subtitle { font: 500 18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #aab4c3; }
+      .phase { font: 800 22px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .status { font: 700 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #93c5fd; letter-spacing: 1.5px; }
+      .item { font: 600 15px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #dbe4f0; }
+      .note { font: 600 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #8b98ad; }
+      .metric { font: 800 24px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .metricLabel { font: 700 12px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9ca8bc; letter-spacing: 1.3px; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="780" fill="url(#bg)"/>
+  <circle cx="1190" cy="120" r="190" fill="#1d4ed8" opacity="0.10"/>
+  <circle cx="160" cy="620" r="220" fill="#10b981" opacity="0.08"/>
+
+  <text x="70" y="82" class="title">Agentic Document AI Platform for Safety Engineering</text>
+  <text x="70" y="118" class="subtitle">Milestone roadmap for a production-style Document AI, requirements engineering, traceability, and agent operations backend.</text>
+
+  <g transform="translate(70 155)">
+    <rect x="0" y="0" width="1260" height="90" rx="18" fill="#0f172a" stroke="#28364f"/>
+    <g transform="translate(42 25)">
+      <text class="metric" x="0" y="26">FastAPI</text>
+      <text class="metricLabel" x="0" y="51">BACKEND API</text>
+    </g>
+    <g transform="translate(260 25)">
+      <text class="metric" x="0" y="26">RAG</text>
+      <text class="metricLabel" x="0" y="51">PROJECT RETRIEVAL</text>
+    </g>
+    <g transform="translate(475 25)">
+      <text class="metric" x="0" y="26">Pydantic</text>
+      <text class="metricLabel" x="0" y="51">STRUCTURED OUTPUTS</text>
+    </g>
+    <g transform="translate(730 25)">
+      <text class="metric" x="0" y="26">Traceability</text>
+      <text class="metricLabel" x="0" y="51">REQS TO TESTS</text>
+    </g>
+    <g transform="translate(1010 25)">
+      <text class="metric" x="0" y="26">Agent Ops</text>
+      <text class="metricLabel" x="0" y="51">COST + QUALITY</text>
+    </g>
+  </g>
+
+  <line x1="155" y1="390" x2="1235" y2="390" stroke="#334155" stroke-width="4" stroke-linecap="round"/>
+  <line x1="155" y1="390" x2="695" y2="390" stroke="#22c55e" stroke-width="5" stroke-linecap="round" filter="url(#softGlow)"/>
+  <line x1="695" y1="390" x2="965" y2="390" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" filter="url(#softGlow)"/>
+  <circle cx="155" cy="390" r="15" fill="#22c55e" stroke="#ecfdf5" stroke-width="3"/>
+  <circle cx="425" cy="390" r="15" fill="#22c55e" stroke="#ecfdf5" stroke-width="3"/>
+  <circle cx="695" cy="390" r="15" fill="#38bdf8" stroke="#e0f2fe" stroke-width="3"/>
+  <circle cx="965" cy="390" r="15" fill="#f59e0b" stroke="#fffbeb" stroke-width="3"/>
+  <circle cx="1235" cy="390" r="15" fill="#64748b" stroke="#cbd5e1" stroke-width="3"/>
+
+  <g transform="translate(70 445)">
+    <rect x="0" y="0" width="285" height="245" rx="18" fill="#111a2b" stroke="#2a3851"/>
+    <text x="26" y="42" class="status">COMPLETED</text>
+    <text x="26" y="75" class="phase">Platform Foundation</text>
+    <text x="26" y="112" class="item">✓ Project workspaces</text>
+    <text x="26" y="143" class="item">✓ Upload + chunk documents</text>
+    <text x="26" y="174" class="item">✓ Project-specific retrieval</text>
+    <text x="26" y="205" class="item">✓ Requirements extraction</text>
+    <text x="26" y="224" class="note">Backend and core data model are usable.</text>
+  </g>
+
+  <g transform="translate(385 445)">
+    <rect x="0" y="0" width="285" height="245" rx="18" fill="#111a2b" stroke="#2a3851"/>
+    <text x="26" y="42" class="status">COMPLETED</text>
+    <text x="26" y="75" class="phase">Safety Engineering Layer</text>
+    <text x="26" y="112" class="item">✓ Quality scoring</text>
+    <text x="26" y="143" class="item">✓ Traceability matrix</text>
+    <text x="26" y="174" class="item">✓ Test-case generation</text>
+    <text x="26" y="205" class="item">✓ Report exports</text>
+    <text x="26" y="224" class="note">Workflow connects evidence to tests.</text>
+  </g>
+
+  <g transform="translate(700 445)">
+    <rect x="0" y="0" width="285" height="245" rx="18" fill="#111a2b" stroke="#2a3851"/>
+    <text x="26" y="42" class="status" fill="#7dd3fc">IN PROGRESS</text>
+    <text x="26" y="75" class="phase">Validation + Demo UX</text>
+    <text x="26" y="112" class="item">• Railway dataset testing</text>
+    <text x="26" y="143" class="item">• OpenAI / local / no-LLM modes</text>
+    <text x="26" y="174" class="item">• Knowledge graph polish</text>
+    <text x="26" y="205" class="item">• Recruiter demo video</text>
+    <text x="26" y="224" class="note">Focus is clarity, reliability, and proof.</text>
+  </g>
+
+  <g transform="translate(1015 445)">
+    <rect x="0" y="0" width="285" height="245" rx="18" fill="#111a2b" stroke="#2a3851"/>
+    <text x="26" y="42" class="status" fill="#fbbf24">NEXT</text>
+    <text x="26" y="75" class="phase">Production Roadmap</text>
+    <text x="26" y="112" class="item">→ Better benchmark datasets</text>
+    <text x="26" y="143" class="item">→ Clause-level references</text>
+    <text x="26" y="174" class="item">→ Persistent graph layouts</text>
+    <text x="26" y="205" class="item">→ Auth + background jobs</text>
+    <text x="26" y="224" class="note">Designed for future deployment hardening.</text>
+  </g>
+
+  <g transform="translate(70 275)">
+    <text x="0" y="0" class="status">PROJECT MATURITY</text>
+    <text x="0" y="34" class="subtitle">Current position: functional prototype with production-style architecture and active validation.</text>
+  </g>
+  <g transform="translate(1015 285)">
+    <rect x="0" y="0" width="285" height="62" rx="14" fill="#0f172a" stroke="#28364f"/>
+    <circle cx="28" cy="31" r="7" fill="#22c55e"/>
+    <text x="48" y="36" class="item">Recruiter-ready technical demo</text>
+  </g>
+</svg>

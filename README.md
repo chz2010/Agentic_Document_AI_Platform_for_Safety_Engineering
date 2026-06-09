@@ -17,6 +17,10 @@ project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
 
+## Project Roadmap
+
+![Project roadmap](docs/project_roadmap.svg)
+
 ## What This Project Shows
 
 - FastAPI backend engineering
@@ -67,6 +71,18 @@ presentations/Project_1_Project_2_Interaction_Architecture.pptx
 
 They explain the backend architecture of this platform and how it complements
 the first Autonomous Driving Safety Analyst project.
+
+## Polished Frontend Handoff
+
+The Streamlit app is the technical analyst dashboard. A Lovable/React frontend
+can be added later as a polished product-demo UI while keeping this FastAPI
+backend as the system of record.
+
+Use this prompt as the frontend handoff:
+
+```text
+docs/lovable_frontend_prompt.md
+```
 
 ## Demo Dataset
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import altair as alt
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 DEFAULT_API_URL = os.getenv("SAFETY_BACKEND_API_URL", "http://127.0.0.1:8000")
@@ -24,11 +26,206 @@ st.set_page_config(
     layout="wide",
 )
 
+if "api_url" not in st.session_state:
+    st.session_state["api_url"] = DEFAULT_API_URL
+
 
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    html, body, [class*="css"], .stApp, .stMarkdown, .stText, .stCaption,
+    .stButton button, .stSelectbox, .stTextInput, .stTextArea, .stDataFrame,
+    section[data-testid="stSidebar"], div[data-testid="stSidebarUserContent"] {
+        font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        letter-spacing: 0;
+    }
+    .stApp {
+        background: #050810;
+        color: #f5f7fb;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        letter-spacing: -0.01em;
+        color: #f5f7fb;
+        font-weight: 800;
+    }
+    p, li, label, span {
+        letter-spacing: 0;
+    }
+    .block-container {padding-top: 2.25rem; padding-bottom: 2rem; max-width: 100%;}
+    section[data-testid="stSidebar"] {
+        background: #101827;
+        border-right: 1px solid #253044;
+        min-width: 280px;
+    }
+    section[data-testid="stSidebar"] > div {
+        padding-top: 0.5rem;
+    }
+    div[data-testid="stSidebarHeader"] {
+        display: none;
+    }
+    .app-brand {
+        display: flex;
+        gap: 0.65rem;
+        align-items: center;
+        margin: 0.15rem 0 0.85rem 0;
+        padding-bottom: 0.85rem;
+        border-bottom: 1px solid #253044;
+    }
+    .app-brand-mark {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: #e5eefc;
+        color: #101827;
+        font-weight: 900;
+        letter-spacing: 0;
+    }
+    .app-brand-title {
+        color: #f5f7fb;
+        font-size: 0.98rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+    .app-brand-subtitle {
+        color: #9ca8bc;
+        font-size: 0.66rem;
+        font-weight: 600;
+        letter-spacing: 0.12rem;
+        text-transform: uppercase;
+        margin-top: 0.15rem;
+    }
+    .nav-label {
+        color: #9ca8bc;
+        font-size: 0.92rem;
+        font-weight: 500;
+        letter-spacing: 0;
+        margin: 1rem 0 0.35rem 0;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] {
+        gap: 0.18rem;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label {
+        min-height: 2.55rem;
+        border-radius: 0 12px 12px 0;
+        padding: 0.08rem 0.85rem;
+        margin-left: -1rem;
+        margin-right: -1rem;
+        width: calc(100% + 2rem);
+        color: #f5f7fb;
+        transition: background 120ms ease, color 120ms ease;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background: #1a2638;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+        background: #203047;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+        display: none;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label p {
+        font-size: 1.02rem;
+        line-height: 1.35;
+        font-weight: 600;
+        color: #f5f7fb;
+        margin: 0;
+    }
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background: #111827;
+        border: 1px solid #3a465d;
+        border-radius: 12px;
+        min-height: 2.55rem;
+    }
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+        color: #f5f7fb;
+        font-size: 0.95rem;
+    }
+    section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 12px;
+        min-height: 2.45rem;
+        background: #203047;
+        border: 1px solid #203047;
+        color: #f5f7fb;
+        font-size: 0.94rem;
+        font-weight: 650;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: #273a56;
+        border-color: #3a4d6a;
+        color: #ffffff;
+    }
+    .top-bar {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid #253044;
+        border-radius: 8px;
+        background: #070c18;
+        padding: 0.65rem 0.8rem;
+        margin-bottom: 1rem;
+    }
+    .top-bar-left {
+        display: flex;
+        gap: 0.55rem;
+        align-items: center;
+        min-width: 0;
+        flex: 1;
+    }
+    .backend-url-pill {
+        color: #aab4c3;
+        background: #101827;
+        border: 1px solid #334058;
+        border-radius: 7px;
+        padding: 0.45rem 0.65rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.92rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 760px;
+    }
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.42rem;
+        border-radius: 7px;
+        padding: 0.45rem 0.65rem;
+        font-size: 0.82rem;
+        font-weight: 800;
+        letter-spacing: 0.06rem;
+        text-transform: uppercase;
+        border: 1px solid #334058;
+    }
+    .status-badge.online {color: #5ee6a8; background: #0f2d24; border-color: #1f6f4f;}
+    .status-badge.offline {color: #ff9ba7; background: #351a20; border-color: #93404d;}
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+        display: inline-block;
+    }
+    .page-header {
+        border-bottom: 1px solid #253044;
+        padding: 0.25rem 0 1rem 0;
+        margin-bottom: 1.35rem;
+    }
+    .page-title {
+        color: #f5f7fb;
+        font-size: 1.45rem;
+        font-weight: 850;
+        margin-bottom: 0.25rem;
+    }
+    .page-subtitle {
+        color: #9ca8bc;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
     div[data-testid="stMetric"] {
         border: 1px solid #384152;
         border-radius: 8px;
@@ -163,9 +360,9 @@ st.markdown(
     .grafana-stat {
         border: 1px solid #384152;
         border-radius: 8px;
-        background: #0d111a;
-        padding: 0.85rem;
-        min-height: 92px;
+        background: #111a2b;
+        padding: 1rem;
+        min-height: 108px;
     }
     .grafana-stat-label {
         color: #8ea0b8;
@@ -371,6 +568,56 @@ def line_chart(
         titleColor="#aab4c3",
         gridColor="#2a3344",
     ).configure_title(color="#f5f7fb", fontSize=14, anchor="start")
+    st.altair_chart(chart, use_container_width=True)
+
+
+def overview_latency_chart(rows: pd.DataFrame) -> None:
+    if rows.empty or "run_index" not in rows.columns or "latency_ms" not in rows.columns:
+        st.info("No latency data available yet.")
+        return
+    chart = (
+        alt.Chart(rows)
+        .mark_line(color="#1d5cff", strokeWidth=3, interpolate="monotone")
+        .encode(
+            x=alt.X("run_index:Q", title=None, axis=alt.Axis(tickMinStep=1, labelColor="#8f98a8", gridColor="#1e2a3d")),
+            y=alt.Y("latency_ms:Q", title=None, scale=alt.Scale(zero=True), axis=alt.Axis(labelColor="#8f98a8", gridColor="#1e2a3d")),
+            tooltip=[
+                alt.Tooltip("run_index:Q", title="Run"),
+                alt.Tooltip("operation_name:N", title="Operation"),
+                alt.Tooltip("latency_ms:Q", title="Latency ms", format=",.0f"),
+            ],
+        )
+        .properties(title="LATENCY PER AGENT RUN (MS)", height=320)
+        .configure(background="#111a2b")
+        .configure_view(stroke="#2b3850", strokeWidth=1)
+        .configure_title(color="#9ca8bc", fontSize=14, fontWeight=700, anchor="start", offset=14)
+        .configure_axis(domainColor="#8f98a8", tickColor="#8f98a8")
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def overview_quality_chart(rows: pd.DataFrame) -> None:
+    if rows.empty or "run_index" not in rows.columns or "evaluation_score" not in rows.columns:
+        st.info("No evaluation quality data available yet.")
+        return
+    chart = (
+        alt.Chart(rows)
+        .mark_bar(color="#09bf85", width=42)
+        .encode(
+            x=alt.X("run_index:O", title=None, axis=alt.Axis(labelColor="#8f98a8", gridColor="#1e2a3d")),
+            y=alt.Y("evaluation_score:Q", title=None, scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(labelColor="#8f98a8", gridColor="#1e2a3d")),
+            tooltip=[
+                alt.Tooltip("run_index:O", title="Run"),
+                alt.Tooltip("operation_name:N", title="Operation"),
+                alt.Tooltip("evaluation_score:Q", title="Quality", format=".2f"),
+            ],
+        )
+        .properties(title="EVALUATION QUALITY SCORE", height=320)
+        .configure(background="#111a2b")
+        .configure_view(stroke="#2b3850", strokeWidth=1)
+        .configure_title(color="#9ca8bc", fontSize=14, fontWeight=700, anchor="start", offset=14)
+        .configure_axis(domainColor="#8f98a8", tickColor="#8f98a8")
+    )
     st.altair_chart(chart, use_container_width=True)
 
 
@@ -622,7 +869,8 @@ def quality_review(requirements: list[dict[str, Any]]) -> dict[str, Any]:
 
 def backend_health() -> dict[str, Any] | None:
     try:
-        response = requests.get(f"{st.session_state.api_url.rstrip('/')}/health", timeout=5)
+        api_url = st.session_state.get("api_url", DEFAULT_API_URL).rstrip("/")
+        response = requests.get(f"{api_url}/health", timeout=5)
     except requests.RequestException:
         return None
     if response.status_code != 200:
@@ -641,12 +889,72 @@ def load_projects() -> list[dict[str, Any]]:
 def selected_project(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not projects:
         return None
-    project_options = {
-        f"{project['id']} - {project['name']}": project
-        for project in projects
-    }
-    selected_label = st.sidebar.selectbox("Active project", list(project_options.keys()))
-    return project_options[selected_label]
+    return st.sidebar.selectbox(
+        "Project",
+        projects,
+        format_func=lambda project: project.get("name", f"Project {project.get('id')}"),
+    )
+
+
+PAGES = {
+    "Overview": {"subtitle": "Real-time view of documents, requirements, traceability, and agent operations."},
+    "Documents": {"subtitle": "Upload, parse, chunk, and index safety engineering documents."},
+    "Ask / RAG": {"subtitle": "Ask project-specific safety and requirements questions with retrieved evidence."},
+    "Retrieval": {"subtitle": "Search across project documents, requirements, traceability, tests, and runs."},
+    "Precision": {"subtitle": "Review reranked evidence, confidence, candidate standards references, and human-review flags."},
+    "Requirements": {"subtitle": "Extract, generate, evaluate, and review structured requirements."},
+    "Traceability": {"subtitle": "Inspect Hazard -> Safety Goal -> Requirement -> Test Case -> Evidence links."},
+    "Knowledge Graph": {"subtitle": "Visualize project evidence, requirements, tests, workflow, and operations as linked entities."},
+    "Agent Ops": {"subtitle": "Monitor reliability, latency, cost, tokens, hallucination flags, and approvals."},
+    "Workflow": {"subtitle": "Track first-project and backend review workflows from intake to reporting."},
+    "Reports": {"subtitle": "Preview and export Markdown, CSV, and structured review reports."},
+}
+
+
+def render_brand() -> None:
+    st.sidebar.markdown(
+        "<div class='app-brand'>"
+        "<div class='app-brand-mark'>SE</div>"
+        "<div>"
+        "<div class='app-brand-title'>Safety Eng. AI</div>"
+        "<div class='app-brand-subtitle'>Agentic Document Ops</div>"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_navigation() -> str:
+    st.sidebar.markdown("<div class='nav-label'>Workspace</div>", unsafe_allow_html=True)
+    page_labels = list(PAGES.keys())
+    current = st.sidebar.radio("Navigation", page_labels, label_visibility="collapsed")
+    return current
+
+
+def render_top_bar(health: dict[str, Any] | None) -> None:
+    api_url = st.session_state.get("api_url", DEFAULT_API_URL)
+    status_class = "online" if health else "offline"
+    status_text = "Online" if health else "Offline"
+    st.markdown(
+        "<div class='top-bar'>"
+        "<div class='top-bar-left'>"
+        f"<div class='backend-url-pill'>{html.escape(api_url)}</div>"
+        f"<div class='status-badge {status_class}'><span class='status-dot'></span>{status_text}</div>"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_header(page: str) -> None:
+    meta = PAGES.get(page, {})
+    st.markdown(
+        "<div class='page-header'>"
+        f"<div class='page-title'>{html.escape(page)}</div>"
+        f"<div class='page-subtitle'>{html.escape(meta.get('subtitle', ''))}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def create_seed_demo_project() -> dict[str, Any]:
@@ -673,16 +981,17 @@ def create_seed_demo_project() -> dict[str, Any]:
 
 
 def render_project_sidebar() -> dict[str, Any] | None:
-    st.sidebar.header("Workspace")
-    st.sidebar.text_input("Backend API", key="api_url", value=DEFAULT_API_URL)
-    st.sidebar.caption("FastAPI must be running before the UI can load data.")
+    render_brand()
     health = backend_health()
     if not health:
         st.sidebar.error("Backend offline")
         st.info("Start the backend with: `.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000`")
         st.stop()
-    st.sidebar.success("Backend online")
 
+    selected_page = render_navigation()
+    st.session_state["selected_page"] = selected_page
+
+    st.sidebar.markdown("<div class='nav-label'>Project</div>", unsafe_allow_html=True)
     with st.sidebar.expander("Create project", expanded=False):
         with st.form("create_project"):
             name = st.text_input("Project name", value="AEB Pedestrian Safety Case")
@@ -709,17 +1018,23 @@ def render_project_sidebar() -> dict[str, Any] | None:
             )
             st.rerun()
 
-    if st.sidebar.button("Load seed demo", use_container_width=True):
-        create_seed_demo_project()
-        st.rerun()
-
     projects = load_projects()
     if not projects:
+        if st.sidebar.button("Load seed demo", use_container_width=True):
+            create_seed_demo_project()
+            st.rerun()
         st.warning("No projects yet. Create a project or load the seed demo from the sidebar.")
         return None
     project = selected_project(projects)
     if project:
-        with st.sidebar.expander("Delete active project", expanded=False):
+        action_cols = st.sidebar.columns([0.82, 0.18])
+        if action_cols[0].button("+  New", use_container_width=True):
+            create_seed_demo_project()
+            st.rerun()
+        if action_cols[1].button("⌫", use_container_width=True, help="Open delete confirmation"):
+            st.session_state[f"show_delete_project_{project['id']}"] = not st.session_state.get(f"show_delete_project_{project['id']}", False)
+            st.rerun()
+        if st.session_state.get(f"show_delete_project_{project['id']}", False):
             st.caption("This removes the project, documents, runs, requirements, workflow items, and local vector entries.")
             confirmation = st.text_input("Type the project ID to confirm", key=f"delete_project_confirm_{project['id']}")
             if st.button("Delete project", use_container_width=True, key=f"delete_project_{project['id']}"):
@@ -740,19 +1055,66 @@ def render_overview(project: dict[str, Any]) -> None:
     docs = api_request("GET", f"/projects/{project['id']}/documents")
     runs = api_request("GET", f"/projects/{project['id']}/evaluation-runs")
     dashboard = api_request("GET", f"/projects/{project['id']}/agent-operations/dashboard")
+    traceability = api_request("GET", f"/projects/{project['id']}/traceability")
+    requirements_count = len(traceability)
+    average_quality = (
+        sum(float(row.get("quality_score") or 0.0) for row in traceability) / requirements_count
+        if requirements_count
+        else None
+    )
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Documents", len(docs))
-    col2.metric("Evaluation runs", len(runs))
-    col3.metric("Agent runs", dashboard["total_runs"])
-    col4.metric("Escalation rate", f"{dashboard['escalation_rate']:.0%}")
+    stat_rows = [
+        [
+            ("Documents", len(docs), "Uploaded and indexed"),
+            ("Requirements", requirements_count or "—", "Extracted or generated"),
+            ("Traceability rows", len(traceability), "Matrix links"),
+            ("Evaluation runs", len(runs), "Stored analyses"),
+            ("Agent runs", dashboard["total_runs"], "Operational logs"),
+        ],
+        [
+            ("Avg quality", f"{average_quality:.2f}" if average_quality is not None else "—", "Requirement score"),
+            ("Avg latency", f"{dashboard['average_latency_ms']:.0f} ms", "Agent run time"),
+            ("Total cost", f"${dashboard['total_cost_usd']:.4f}", "Estimated usage"),
+            ("Output tokens", dashboard.get("total_output_tokens", 0) or "—", "Generated tokens"),
+            ("Escalation", f"{dashboard['escalation_rate']:.0%}", "Human review load"),
+        ],
+    ]
+    for row in stat_rows:
+        cols = st.columns(5)
+        for col, (label, value, note) in zip(cols, row):
+            with col:
+                grafana_stat(label, value, note)
 
-    st.subheader("Project")
-    st.write(project.get("description") or "No description.")
-    st.dataframe(
+    st.markdown("<div class='grafana-panel-title'>Evaluation trend panels</div>", unsafe_allow_html=True)
+    runs_frame = dataframe(api_request("GET", f"/projects/{project['id']}/agent-runs"))
+    chart_cols = st.columns(2)
+    if runs_frame.empty:
+        with chart_cols[0]:
+            st.info("No agent runs yet. Ask a question or run tool orchestration to populate latency and quality panels.")
+        with chart_cols[1]:
+            st.info("Evaluation score charts appear after query, extraction, or orchestration runs.")
+    else:
+        if "created_at" in runs_frame.columns:
+            runs_frame["created_at"] = pd.to_datetime(runs_frame["created_at"], errors="coerce")
+        for numeric_column in ["latency_ms", "evaluation_score"]:
+            if numeric_column in runs_frame.columns:
+                runs_frame[numeric_column] = pd.to_numeric(runs_frame[numeric_column], errors="coerce").fillna(0.0)
+        if "token_usage" in runs_frame.columns:
+            runs_frame["output_tokens"] = runs_frame["token_usage"].apply(output_tokens_from_usage)
+        ordered_runs = runs_frame.sort_values("created_at") if "created_at" in runs_frame.columns else runs_frame
+        ordered_runs = ordered_runs.reset_index(drop=True)
+        ordered_runs["run_index"] = ordered_runs.index + 1
+        with chart_cols[0]:
+            overview_latency_chart(ordered_runs)
+        with chart_cols[1]:
+            overview_quality_chart(ordered_runs)
+
+    st.markdown("<div class='grafana-panel-title'>Project documents</div>", unsafe_allow_html=True)
+    wrapped_table(
         dataframe(docs, ["id", "filename", "source_type", "chunk_count", "created_at"]),
-        use_container_width=True,
-        hide_index=True,
+        ["id", "filename", "source_type", "chunk_count", "created_at"],
+        labels={"id": "ID", "filename": "Document", "source_type": "Type", "chunk_count": "Chunks", "created_at": "Created"},
+        widths={"id": "col-id", "filename": "col-text", "source_type": "col-small", "chunk_count": "col-small", "created_at": "col-medium"},
     )
 
 
@@ -1510,8 +1872,8 @@ def render_knowledge_graph(project: dict[str, Any]) -> None:
         st.info("No graph data yet. Upload a document, extract requirements, and generate test cases to populate the graph.")
         return
 
-    st.markdown("<div class='grafana-panel-title'>Relationship map</div>", unsafe_allow_html=True)
-    render_graph_chart(nodes, edges)
+    st.markdown("<div class='grafana-panel-title'>Interactive relationship map</div>", unsafe_allow_html=True)
+    render_interactive_knowledge_graph(nodes, edges)
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
@@ -1557,7 +1919,492 @@ def render_knowledge_graph(project: dict[str, Any]) -> None:
     )
 
 
-def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    color_map = {
+        "project": "#6ecbff",
+        "document": "#a78bfa",
+        "evidence": "#fbbf24",
+        "hazard": "#fb7185",
+        "safety_goal": "#34d399",
+        "requirement": "#60a5fa",
+        "test_case": "#f472b6",
+        "workflow_item": "#fde047",
+        "evaluation_run": "#22d3ee",
+        "agent_run": "#c084fc",
+    }
+    priority = {
+        "project": 0,
+        "document": 1,
+        "evidence": 2,
+        "hazard": 3,
+        "safety_goal": 4,
+        "requirement": 5,
+        "test_case": 6,
+        "workflow_item": 7,
+        "evaluation_run": 8,
+        "agent_run": 9,
+    }
+    cluster_centers = {
+        "project": (520, 350),
+        "document": (500, 620),
+        "evidence": (170, 350),
+        "hazard": (755, 335),
+        "safety_goal": (640, 250),
+        "requirement": (330, 485),
+        "test_case": (695, 500),
+        "workflow_item": (760, 235),
+        "evaluation_run": (330, 225),
+        "agent_run": (635, 160),
+    }
+    cluster_angles = {
+        "document": (80, 100),
+        "evidence": (-20, 20),
+        "hazard": (-20, 35),
+        "safety_goal": (205, 245),
+        "requirement": (45, 85),
+        "test_case": (215, 255),
+        "workflow_item": (135, 175),
+        "evaluation_run": (20, 65),
+        "agent_run": (115, 160),
+    }
+
+    visible_nodes = sorted(
+        nodes,
+        key=lambda node: (priority.get(node.get("type", ""), 99), str(node.get("label") or node.get("id") or "")),
+    )[:90]
+    visible_ids = {node.get("id") for node in visible_nodes}
+
+    nodes_by_type: dict[str, list[dict[str, Any]]] = {}
+    for node in visible_nodes:
+        nodes_by_type.setdefault(node.get("type", "other"), []).append(node)
+
+    positioned: dict[str, dict[str, Any]] = {}
+    for node_type, typed_nodes in nodes_by_type.items():
+        center_x, center_y = cluster_centers.get(node_type, (520, 350))
+        if node_type == "project":
+            for node in typed_nodes:
+                positioned[node.get("id")] = {**node, "x": center_x, "y": center_y, "size": 7.8}
+            continue
+        start_angle, end_angle = cluster_angles.get(node_type, (0, 360))
+        count = len(typed_nodes)
+        radius = min(120, 28 + max(count, 1) * 4)
+        for index, node in enumerate(typed_nodes):
+            if count == 1:
+                angle = math.radians((start_angle + end_angle) / 2)
+            else:
+                angle = math.radians(start_angle + (end_angle - start_angle) * index / (count - 1))
+            ring = radius + (index % 3) * 9
+            positioned[node.get("id")] = {
+                **node,
+                "x": center_x + math.cos(angle) * ring,
+                "y": center_y + math.sin(angle) * ring,
+                "size": 6.4 if node_type in {"evaluation_run", "agent_run"} else 7.2,
+            }
+
+    relationship_rows = [
+        row
+        for row in graph_relationship_rows(visible_nodes, edges)
+        if row.get("source") in visible_ids and row.get("target") in visible_ids
+    ][:160]
+
+    edge_markup: list[str] = []
+    for row in relationship_rows:
+        source = positioned.get(row["source"])
+        target = positioned.get(row["target"])
+        if not source or not target:
+            continue
+        edge_id = html.escape(row["edge_id"], quote=True)
+        source_label = html.escape(str(row.get("source_label") or ""), quote=True)
+        target_label = html.escape(str(row.get("target_label") or ""), quote=True)
+        source_id = html.escape(str(row.get("source") or ""), quote=True)
+        target_id = html.escape(str(row.get("target") or ""), quote=True)
+        relationship = html.escape(str(row.get("relationship") or "linked_to"), quote=True)
+        metadata = html.escape(json.dumps(row.get("metadata") or {}, ensure_ascii=True), quote=True)
+        edge_markup.append(
+            f"""
+            <line class="kg-line" data-visible-edge="{edge_id}" data-source-id="{source_id}" data-target-id="{target_id}" x1="{source['x']:.1f}" y1="{source['y']:.1f}" x2="{target['x']:.1f}" y2="{target['y']:.1f}" />
+            <line class="kg-edge-hit" data-kg-edge="{edge_id}" data-source-id="{source_id}" data-target-id="{target_id}" data-source="{source_label}" data-target="{target_label}" data-relationship="{relationship}" data-metadata="{metadata}" x1="{source['x']:.1f}" y1="{source['y']:.1f}" x2="{target['x']:.1f}" y2="{target['y']:.1f}" />
+            """
+        )
+
+    node_markup: list[str] = []
+    for node in positioned.values():
+        node_type = node.get("type", "other")
+        color = color_map.get(node_type, "#94a3b8")
+        label = str(node.get("label") or node.get("id") or "node")
+        short_label = label if len(label) <= 26 else f"{label[:23]}..."
+        label_anchor = "start" if node["x"] < 760 else "end"
+        label_dx = 12 if label_anchor == "start" else -12
+        node_id = html.escape(str(node.get("id") or ""), quote=True)
+        node_markup.append(
+            f"""
+            <g class="kg-node" data-node-id="{node_id}" transform="translate({node['x']:.1f} {node['y']:.1f})">
+              <circle cx="0" cy="0" r="{node['size']:.1f}" fill="{color}" />
+              <text x="{label_dx:.1f}" y="4" text-anchor="{label_anchor}">{html.escape(short_label)}</text>
+            </g>
+            """
+        )
+
+    node_positions_json = json.dumps(
+        {
+            str(node_id): {"x": round(node["x"], 1), "y": round(node["y"], 1)}
+            for node_id, node in positioned.items()
+            if node_id is not None
+        },
+        ensure_ascii=True,
+    )
+
+    legend_items = "".join(
+        f"""
+        <div class="kg-legend-item">
+          <span class="kg-dot" style="background:{color};"></span>
+          <span>{html.escape(node_type)}</span>
+        </div>
+        """
+        for node_type, color in color_map.items()
+    )
+
+    graph_html = f"""
+    <div class="kg-shell">
+      <style>
+        .kg-shell {{
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 330px;
+          gap: 18px;
+          height: 700px;
+          background: #050810;
+          color: #f5f7fb;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }}
+        .kg-graph-card, .kg-panel {{
+          background: #111a2b;
+          border: 1px solid #2a3851;
+          border-radius: 14px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }}
+        .kg-graph-card {{
+          min-width: 0;
+          overflow: hidden;
+          position: relative;
+        }}
+        .kg-graph-card::after {{
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background: radial-gradient(circle at 52% 48%, rgba(96,165,250,0.10), transparent 34%);
+        }}
+        .kg-canvas {{
+          width: 100%;
+          height: 100%;
+          display: block;
+        }}
+        .kg-line {{
+          stroke: #53637c;
+          stroke-width: 1.25;
+          opacity: 0.42;
+          transition: stroke 160ms ease, opacity 160ms ease, stroke-width 160ms ease;
+        }}
+        .kg-line.selected {{
+          stroke: #e5f6ff;
+          stroke-width: 3.2;
+          opacity: 0.98;
+          filter: drop-shadow(0 0 5px rgba(125,211,252,0.75));
+        }}
+        .kg-edge-hit {{
+          stroke: transparent;
+          stroke-width: 13;
+          cursor: pointer;
+          pointer-events: stroke;
+        }}
+        .kg-edge-hit:hover + .kg-line,
+        .kg-edge-hit:hover {{
+          opacity: 1;
+        }}
+        .kg-node circle {{
+          stroke: rgba(255,255,255,0.88);
+          stroke-width: 0.8;
+          filter: drop-shadow(0 0 4px rgba(125,211,252,0.34));
+        }}
+        .kg-node {{
+          cursor: grab;
+          user-select: none;
+        }}
+        .kg-node.dragging {{
+          cursor: grabbing;
+        }}
+        .kg-node.dragging circle {{
+          stroke-width: 1.5;
+          filter: drop-shadow(0 0 10px rgba(125,211,252,0.85));
+        }}
+        .kg-node text {{
+          fill: #cbd5e1;
+          font-size: 10.5px;
+          font-weight: 650;
+          letter-spacing: 0;
+          paint-order: stroke;
+          stroke: #111a2b;
+          stroke-width: 3px;
+          stroke-linejoin: round;
+        }}
+        .kg-side {{
+          display: grid;
+          grid-template-rows: auto 1fr;
+          gap: 18px;
+          min-width: 0;
+        }}
+        .kg-panel {{
+          padding: 22px 24px;
+        }}
+        .kg-panel-title {{
+          color: #9ca8bc;
+          font-size: 0.82rem;
+          font-weight: 850;
+          letter-spacing: 0.14rem;
+          text-transform: uppercase;
+          margin-bottom: 18px;
+        }}
+        .kg-legend-grid {{
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          column-gap: 22px;
+          row-gap: 14px;
+        }}
+        .kg-legend-item {{
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          color: #aab4c3;
+          font-size: 0.86rem;
+          font-weight: 650;
+        }}
+        .kg-dot {{
+          width: 10px;
+          height: 10px;
+          border-radius: 999px;
+          box-shadow: 0 0 8px currentColor;
+          flex: 0 0 auto;
+        }}
+        .kg-detail-empty {{
+          color: #aab4c3;
+          font-size: 0.92rem;
+          line-height: 1.55;
+        }}
+        .kg-detail-row {{
+          margin-bottom: 16px;
+        }}
+        .kg-detail-label {{
+          color: #7d8aa0;
+          font-size: 0.72rem;
+          font-weight: 850;
+          letter-spacing: 0.1rem;
+          text-transform: uppercase;
+          margin-bottom: 5px;
+        }}
+        .kg-detail-value {{
+          color: #f5f7fb;
+          font-size: 0.95rem;
+          font-weight: 750;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
+        }}
+        .kg-metadata {{
+          color: #aab4c3;
+          font-size: 0.78rem;
+          line-height: 1.45;
+          background: rgba(5,8,16,0.45);
+          border: 1px solid #253044;
+          border-radius: 10px;
+          padding: 10px;
+          max-height: 190px;
+          overflow: auto;
+          white-space: pre-wrap;
+        }}
+        @media (max-width: 900px) {{
+          .kg-shell {{
+            grid-template-columns: 1fr;
+            height: 980px;
+          }}
+        }}
+      </style>
+      <div class="kg-graph-card">
+        <svg class="kg-canvas" viewBox="0 0 920 680" preserveAspectRatio="xMidYMid meet" aria-label="Interactive knowledge graph">
+          <g opacity="0.9">
+            {''.join(edge_markup)}
+          </g>
+          <g>
+            {''.join(node_markup)}
+          </g>
+        </svg>
+      </div>
+      <div class="kg-side">
+        <div class="kg-panel">
+          <div class="kg-panel-title">Legend</div>
+          <div class="kg-legend-grid">{legend_items}</div>
+        </div>
+        <div class="kg-panel" id="kg-detail">
+          <div class="kg-panel-title">Selected Relationship</div>
+          <div class="kg-detail-empty">Click an edge in the graph to inspect how two entities are linked.</div>
+        </div>
+      </div>
+      <script>
+        const detail = document.getElementById("kg-detail");
+        const svg = document.querySelector(".kg-canvas");
+        const nodePositions = {node_positions_json};
+        const htmlEscape = (value) => String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+        const svgPoint = (event) => {{
+          const point = svg.createSVGPoint();
+          point.x = event.clientX;
+          point.y = event.clientY;
+          return point.matrixTransform(svg.getScreenCTM().inverse());
+        }};
+        const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+        const updateConnectedEdges = (nodeId) => {{
+          const position = nodePositions[nodeId];
+          if (!position) return;
+          document.querySelectorAll(".kg-line, .kg-edge-hit").forEach((line) => {{
+            if (line.dataset.sourceId === nodeId) {{
+              line.setAttribute("x1", position.x);
+              line.setAttribute("y1", position.y);
+            }}
+            if (line.dataset.targetId === nodeId) {{
+              line.setAttribute("x2", position.x);
+              line.setAttribute("y2", position.y);
+            }}
+          }});
+        }};
+        let activeNode = null;
+        document.querySelectorAll(".kg-node").forEach((node) => {{
+          node.addEventListener("pointerdown", (event) => {{
+            event.preventDefault();
+            event.stopPropagation();
+            const nodeId = node.dataset.nodeId;
+            const start = svgPoint(event);
+            const current = nodePositions[nodeId];
+            if (!current) return;
+            activeNode = {{
+              element: node,
+              nodeId,
+              offsetX: current.x - start.x,
+              offsetY: current.y - start.y,
+            }};
+            node.classList.add("dragging");
+            node.setPointerCapture(event.pointerId);
+          }});
+          node.addEventListener("pointermove", (event) => {{
+            if (!activeNode || activeNode.element !== node) return;
+            event.preventDefault();
+            const point = svgPoint(event);
+            const next = {{
+              x: clamp(point.x + activeNode.offsetX, 22, 898),
+              y: clamp(point.y + activeNode.offsetY, 22, 658),
+            }};
+            nodePositions[activeNode.nodeId] = next;
+            node.setAttribute("transform", `translate(${{next.x}} ${{next.y}})`);
+            updateConnectedEdges(activeNode.nodeId);
+          }});
+          const clearDrag = (event) => {{
+            if (!activeNode || activeNode.element !== node) return;
+            node.classList.remove("dragging");
+            try {{
+              node.releasePointerCapture(event.pointerId);
+            }} catch (error) {{}}
+            activeNode = null;
+          }};
+          node.addEventListener("pointerup", clearDrag);
+          node.addEventListener("pointercancel", clearDrag);
+        }});
+        document.querySelectorAll(".kg-edge-hit").forEach((edge) => {{
+          edge.addEventListener("click", () => {{
+            document.querySelectorAll(".kg-line").forEach((line) => line.classList.remove("selected"));
+            const selected = document.querySelector(`.kg-line[data-visible-edge="${{edge.dataset.kgEdge}}"]`);
+            if (selected) {{
+              selected.classList.add("selected");
+            }}
+            let metadata = edge.dataset.metadata || "{{}}";
+            try {{
+              metadata = JSON.stringify(JSON.parse(metadata), null, 2);
+            }} catch (error) {{}}
+            detail.innerHTML = `
+              <div class="kg-panel-title">Selected Relationship</div>
+              <div class="kg-detail-row">
+                <div class="kg-detail-label">Source</div>
+                <div class="kg-detail-value">${{htmlEscape(edge.dataset.source)}}</div>
+              </div>
+              <div class="kg-detail-row">
+                <div class="kg-detail-label">Relationship</div>
+                <div class="kg-detail-value">${{htmlEscape(edge.dataset.relationship)}}</div>
+              </div>
+              <div class="kg-detail-row">
+                <div class="kg-detail-label">Target</div>
+                <div class="kg-detail-value">${{htmlEscape(edge.dataset.target)}}</div>
+              </div>
+              <div class="kg-detail-row">
+                <div class="kg-detail-label">Metadata</div>
+                <div class="kg-metadata">${{htmlEscape(metadata)}}</div>
+              </div>
+            `;
+          }});
+        }});
+      </script>
+    </div>
+    """
+    components.html(graph_html, height=720, scrolling=False)
+
+
+def graph_relationship_rows(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    node_lookup = {
+        node.get("id"): {
+            "label": node.get("label") or node.get("id"),
+            "type": node.get("type", "unknown"),
+            "metadata": node.get("metadata", {}),
+        }
+        for node in nodes
+    }
+    rows: list[dict[str, Any]] = []
+    for index, edge in enumerate(edges):
+        source_id = edge.get("source")
+        target_id = edge.get("target")
+        source = node_lookup.get(source_id, {"label": source_id, "type": "unknown", "metadata": {}})
+        target = node_lookup.get(target_id, {"label": target_id, "type": "unknown", "metadata": {}})
+        relationship = edge.get("relationship", "linked_to")
+        rows.append(
+            {
+                "edge_id": f"edge-{index}",
+                "source": source_id,
+                "source_label": source.get("label"),
+                "source_type": source.get("type"),
+                "relationship": relationship,
+                "target": target_id,
+                "target_label": target.get("label"),
+                "target_type": target.get("type"),
+                "metadata": edge.get("metadata", {}),
+                "label": f"{source.get('label')} -> {relationship} -> {target.get('label')}",
+            }
+        )
+    return rows
+
+
+def render_relationship_detail(row: dict[str, Any]) -> None:
+    st.markdown("#### Selected Relationship")
+    detail_cols = st.columns(3)
+    with detail_cols[0]:
+        grafana_stat("Source", row["source_label"], row["source_type"])
+    with detail_cols[1]:
+        grafana_stat("Relationship", row["relationship"], "How the nodes are linked")
+    with detail_cols[2]:
+        grafana_stat("Target", row["target_label"], row["target_type"])
+    if row.get("metadata"):
+        st.caption("Relationship metadata")
+        st.json(row["metadata"], expanded=False)
+
+
+def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], selected_edge_id: str | None = None) -> None:
     layer_order = {
         "project": 0,
         "document": 1,
@@ -1588,20 +2435,22 @@ def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]])
                     "type": node_type,
                     "x": x_position,
                     "y": y_position,
-                    "size": 220 if node_type == "project" else 120,
+                    "size": 100 if node_type == "project" else 64,
                 }
             )
 
     nodes_frame = pd.DataFrame(positioned_nodes)
     node_lookup = nodes_frame.set_index("id")[["x", "y", "label", "type"]].to_dict("index") if not nodes_frame.empty else {}
     edge_rows = []
-    for edge in edges:
+    for index, edge in enumerate(edges):
         source = node_lookup.get(edge.get("source"))
         target = node_lookup.get(edge.get("target"))
         if not source or not target:
             continue
+        edge_id = f"edge-{index}"
         edge_rows.append(
             {
+                "edge_id": edge_id,
                 "source": edge.get("source"),
                 "target": edge.get("target"),
                 "relationship": edge.get("relationship"),
@@ -1609,6 +2458,7 @@ def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]])
                 "source_y": source["y"],
                 "target_x": target["x"],
                 "target_y": target["y"],
+                "selected": edge_id == selected_edge_id,
             }
         )
 
@@ -1619,33 +2469,147 @@ def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]])
     edges_frame = pd.DataFrame(edge_rows)
     base_width = alt.X("x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4]))
     base_height = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[0, 1]))
-    edge_chart = (
+    edge_glow = (
         alt.Chart(edges_frame)
-        .mark_rule(color="#566274", opacity=0.55)
+        .mark_rule(color="#7dd3fc", opacity=0.10, strokeWidth=3.2)
         .encode(
             x=alt.X("source_x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4])),
             y=alt.Y("source_y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
             x2="target_x:Q",
             y2="target_y:Q",
-            tooltip=["source", "relationship", "target"],
+            tooltip=["source", "relationship", "target", "edge_id"],
         )
         if not edges_frame.empty
         else alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_rule()
     )
-    node_chart = (
+    edge_chart = (
+        alt.Chart(edges_frame)
+        .mark_rule(opacity=0.72)
+        .encode(
+            x=alt.X("source_x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4])),
+            y=alt.Y("source_y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+            x2="target_x:Q",
+            y2="target_y:Q",
+            color=alt.condition(
+                alt.datum.selected,
+                alt.value("#ffffff"),
+                alt.value("#dbeafe"),
+            ),
+            strokeWidth=alt.condition(
+                alt.datum.selected,
+                alt.value(3.5),
+                alt.value(1.2),
+            ),
+            tooltip=["source", "relationship", "target", "edge_id"],
+        )
+        if not edges_frame.empty
+        else alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_rule()
+    )
+    selected_edge_chart = (
+        alt.Chart(edges_frame[edges_frame["selected"]])
+        .mark_rule(color="#ffffff", opacity=0.95, strokeWidth=4.2)
+        .encode(
+            x=alt.X("source_x:Q", axis=None, scale=alt.Scale(domain=[-0.4, 6.4])),
+            y=alt.Y("source_y:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+            x2="target_x:Q",
+            y2="target_y:Q",
+            tooltip=["source", "relationship", "target", "edge_id"],
+        )
+        if not edges_frame.empty and "selected" in edges_frame.columns
+        else alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_rule()
+    )
+    node_glow = (
         alt.Chart(nodes_frame)
-        .mark_circle(stroke="#ffffff", strokeWidth=1.2, opacity=0.95)
+        .mark_circle(stroke=None, opacity=0.18)
         .encode(
             x=base_width,
             y=base_height,
-            size=alt.Size("size:Q", legend=None),
-            color=alt.Color("type:N", legend=alt.Legend(title="Node type")),
+            size=alt.Size("size:Q", scale=alt.Scale(range=[150, 420]), legend=None),
+            color=alt.Color(
+                "type:N",
+                legend=None,
+                scale=alt.Scale(
+                    domain=[
+                        "project",
+                        "document",
+                        "evidence",
+                        "hazard",
+                        "safety_goal",
+                        "requirement",
+                        "test_case",
+                        "workflow_item",
+                        "evaluation_run",
+                        "agent_run",
+                    ],
+                    range=[
+                        "#ffffff",
+                        "#facc15",
+                        "#facc15",
+                        "#fb7185",
+                        "#34d399",
+                        "#7dd3fc",
+                        "#a78bfa",
+                        "#c084fc",
+                        "#60a5fa",
+                        "#f472b6",
+                    ],
+                ),
+            ),
+        )
+    )
+    node_halo = (
+        alt.Chart(nodes_frame)
+        .mark_circle(fillOpacity=0, stroke="#ffffff", strokeOpacity=0.28, strokeWidth=0.9)
+        .encode(
+            x=base_width,
+            y=base_height,
+            size=alt.Size("size:Q", scale=alt.Scale(range=[70, 160]), legend=None),
+            tooltip=["id", "label", "type"],
+        )
+    )
+    node_chart = (
+        alt.Chart(nodes_frame)
+        .mark_circle(stroke="#ffffff", strokeWidth=1.6, opacity=0.98)
+        .encode(
+            x=base_width,
+            y=base_height,
+            size=alt.Size("size:Q", scale=alt.Scale(range=[28, 85]), legend=None),
+            color=alt.Color(
+                "type:N",
+                legend=alt.Legend(title="Node type"),
+                scale=alt.Scale(
+                    domain=[
+                        "project",
+                        "document",
+                        "evidence",
+                        "hazard",
+                        "safety_goal",
+                        "requirement",
+                        "test_case",
+                        "workflow_item",
+                        "evaluation_run",
+                        "agent_run",
+                    ],
+                    range=[
+                        "#ffffff",
+                        "#facc15",
+                        "#facc15",
+                        "#fb7185",
+                        "#34d399",
+                        "#7dd3fc",
+                        "#a78bfa",
+                        "#c084fc",
+                        "#60a5fa",
+                        "#f472b6",
+                    ],
+                ),
+            ),
             tooltip=["id", "label", "type"],
         )
     )
     label_chart = (
         alt.Chart(nodes_frame)
-        .mark_text(dy=-14, fontSize=11, color="#f5f7fb", limit=130)
+        .mark_text(dy=-11, fontSize=10, color="#f5f7fb", limit=120)
         .encode(
             x=base_width,
             y=base_height,
@@ -1677,9 +2641,10 @@ def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]])
         )
     )
     chart = (
-        (edge_chart + node_chart + label_chart + layer_chart)
+        (edge_glow + edge_chart + selected_edge_chart + node_glow + node_halo + node_chart + label_chart + layer_chart)
+        .configure(background="#050810")
         .properties(height=520)
-        .configure_view(strokeWidth=0)
+        .configure_view(strokeWidth=0, fill="#050810")
         .configure_legend(labelColor="#cbd5e1", titleColor="#f5f7fb")
     )
     st.altair_chart(chart, use_container_width=True)
@@ -2266,9 +3231,6 @@ def render_report_traceability_table(traceability: list[dict[str, Any]]) -> None
     )
 
 
-st.title("Agentic Document AI Platform for Safety Engineering")
-st.caption("FastAPI backend UI for project-specific RAG, requirements engineering, traceability, and agent operations.")
-
 project = render_project_sidebar()
 if project:
     if st.session_state.get("active_project_id") != project["id"]:
@@ -2276,44 +3238,34 @@ if project:
             st.session_state.pop(key, None)
         st.session_state["active_project_id"] = project["id"]
 
-    st.markdown(f"### {project['name']}")
+    selected_page = st.session_state.get("selected_page", "Overview")
+    render_page_header(selected_page)
     st.markdown(
-        f"<div class='small-muted'>{project['domain']} | {project['system_type']} | "
+        f"<div class='small-muted'><strong>{html.escape(project['name'])}</strong> · "
+        f"{html.escape(project['domain'])} | {html.escape(project['system_type'])} | "
         f"Standards: {', '.join(project.get('standards_scope', []))}</div>",
         unsafe_allow_html=True,
     )
-    tabs = st.tabs([
-        "Overview",
-        "Documents",
-        "Ask",
-        "Retrieval",
-        "Precision",
-        "Requirements",
-        "Traceability",
-        "Knowledge Graph",
-        "Workflow",
-        "Agent Ops",
-        "Reports",
-    ])
-    with tabs[0]:
+
+    if selected_page == "Overview":
         render_overview(project)
-    with tabs[1]:
+    elif selected_page == "Documents":
         render_documents(project)
-    with tabs[2]:
+    elif selected_page == "Ask / RAG":
         render_query(project)
-    with tabs[3]:
+    elif selected_page == "Retrieval":
         render_retrieval(project)
-    with tabs[4]:
+    elif selected_page == "Precision":
         render_precision_review(project)
-    with tabs[5]:
+    elif selected_page == "Requirements":
         render_requirements(project)
-    with tabs[6]:
+    elif selected_page == "Traceability":
         render_traceability(project)
-    with tabs[7]:
+    elif selected_page == "Knowledge Graph":
         render_knowledge_graph(project)
-    with tabs[8]:
-        render_workflow(project)
-    with tabs[9]:
+    elif selected_page == "Agent Ops":
         render_agent_ops(project)
-    with tabs[10]:
+    elif selected_page == "Workflow":
+        render_workflow(project)
+    elif selected_page == "Reports":
         render_reports(project)

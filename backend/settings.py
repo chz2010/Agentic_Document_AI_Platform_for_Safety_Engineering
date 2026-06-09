@@ -41,6 +41,14 @@ class BackendSettings:
     local_llm_num_predict: int = int(os.getenv("LOCAL_LLM_NUM_PREDICT", "1200"))
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    cors_origins: list[str] = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173",
+        ).split(",")
+        if origin.strip()
+    ]
 
 
 settings = BackendSettings()
