@@ -13,6 +13,11 @@ REQ_PATTERN = re.compile(
     r"(?P<text>[^.\n]*(?:shall|must|should|required to|needs to)[^.\n]*(?:\.|$))",
     re.IGNORECASE,
 )
+REQ_BLOCK_PATTERN = re.compile(
+    r"(?ms)^\s*(?P<id>(?:REQ|SR|FSR|TSR|SWR|HWR|VAL|MON|DATA)[-_A-Z0-9]*\d+)\s*:\s*"
+    r"(?P<body>.*?)(?=^\s*(?:REQ|SR|FSR|TSR|SWR|HWR|VAL|MON|DATA)[-_A-Z0-9]*\d+\s*:|^\s*#{1,6}\s+|\Z)",
+    re.IGNORECASE,
+)
 HAZARD_PATTERN = re.compile(r"\b(HZ[-_A-Z0-9]*\d+)\b", re.IGNORECASE)
 SAFETY_GOAL_PATTERN = re.compile(r"\b(SG[-_A-Z0-9]*\d+)\b", re.IGNORECASE)
 
@@ -90,29 +95,85 @@ def score_requirement(text: str, linked_hazard: str | None, linked_safety_goal: 
 def extract_requirements_from_text(text: str, evidence_source: str | None = None) -> list[Requirement]:
     requirements: list[Requirement] = []
     seen: set[str] = set()
-    for idx, match in enumerate(REQ_PATTERN.finditer(text), start=1):
-        req_text = " ".join(match.group("text").strip().split())
-        if len(req_text) < 20 or req_text.lower() in seen:
+    used_spans: list[tuple[int, int]] = []
+    for block in REQ_BLOCK_PATTERN.finditer(text):
+        used_spans.append(block.span())
+        req_id = block.group("id").upper()
+        block_text = _normalize_requirement_block(block.group("body"))
+        req_text = _requirement_statement(block_text)
+        _append_requirement(requirements, seen, req_id, req_text, block_text, evidence_source)
+
+    fallback_index = len(requirements) + 1
+    for match in REQ_PATTERN.finditer(text):
+        if any(start <= match.start() < end for start, end in used_spans):
             continue
-        seen.add(req_text.lower())
-        req_id = match.group("id") or f"REQ-AUTO-{idx:03d}"
-        hazard = _first_match(HAZARD_PATTERN, req_text)
-        safety_goal = _first_match(SAFETY_GOAL_PATTERN, req_text)
-        score, issues, improvement = score_requirement(req_text, hazard, safety_goal)
-        requirements.append(
-            Requirement(
-                id=req_id,
-                type=classify_requirement(req_text),
-                text=req_text,
-                linked_hazard=hazard,
-                linked_safety_goal=safety_goal,
-                quality_score=score.overall,
-                quality_issues=issues,
-                suggested_improvement=improvement if issues else None,
-                evidence_source=evidence_source,
-            )
-        )
+        req_text = " ".join(match.group("text").strip().split())
+        req_id = (match.group("id") or f"REQ-AUTO-{fallback_index:03d}").upper()
+        added = _append_requirement(requirements, seen, req_id, req_text, req_text, evidence_source)
+        if added:
+            fallback_index += 1
     return requirements
+
+
+def _append_requirement(
+    requirements: list[Requirement],
+    seen: set[str],
+    req_id: str,
+    req_text: str,
+    traceability_text: str,
+    evidence_source: str | None,
+) -> bool:
+    req_text = " ".join(req_text.strip().split())
+    traceability_text = " ".join(traceability_text.strip().split())
+    if len(req_text) < 20 or req_text.lower() in seen:
+        return False
+    seen.add(req_text.lower())
+    hazard = _first_match(HAZARD_PATTERN, traceability_text)
+    safety_goal = _first_match(SAFETY_GOAL_PATTERN, traceability_text)
+    score, issues, improvement = score_requirement(traceability_text or req_text, hazard, safety_goal)
+    requirements.append(
+        Requirement(
+            id=req_id,
+            type=classify_requirement(traceability_text or req_text),
+            text=req_text,
+            linked_hazard=hazard,
+            linked_safety_goal=safety_goal,
+            quality_score=score.overall,
+            quality_issues=issues,
+            suggested_improvement=improvement if issues else None,
+            evidence_source=evidence_source,
+        )
+    )
+    return True
+
+
+def _normalize_requirement_block(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lines.append(stripped)
+    return " ".join(lines)
+
+
+def _requirement_statement(block_text: str) -> str:
+    if not block_text:
+        return ""
+    split_markers = [
+        " Linked hazard:",
+        " Linked Hazard:",
+        " linked hazard:",
+        " Linked safety goal:",
+        " Linked Safety Goal:",
+        " linked safety goal:",
+    ]
+    cut = len(block_text)
+    for marker in split_markers:
+        marker_index = block_text.find(marker)
+        if marker_index != -1:
+            cut = min(cut, marker_index)
+    return block_text[:cut].strip()
 
 
 def generate_requirements_from_standards(
@@ -199,6 +260,72 @@ def generate_requirements_from_standards(
                     "hazard": "HZ-AI-002",
                     "safety_goal": "SG-AI-002",
                     "source": "ISO 8800 candidate reference: AI monitoring, operational controls, and safety assurance clause area",
+                },
+            ]
+        )
+    if any(term in standard for standard in selected for term in ["62278", "50126", "50128", "50129", "ertms", "62425", "rail"]):
+        templates.extend(
+            [
+                {
+                    "id": "REQ-RAIL-RAMS-001",
+                    "type": RequirementType.safety_requirement.value,
+                    "text": f"The {system_type} project shall define RAMS objectives, lifecycle phase responsibilities, acceptance criteria, and verification evidence for each safety-relevant function before authorization.",
+                    "hazard": "HZ-RAIL-RAMS-001",
+                    "safety_goal": "SG-RAIL-RAMS-001",
+                    "source": "IEC 62278 / EN 50126 candidate reference: RAMS lifecycle and safety management clause area",
+                },
+                {
+                    "id": "REQ-RAIL-HAZLOG-001",
+                    "type": RequirementType.functional_safety_requirement.value,
+                    "text": f"The {system_type} hazard log shall link each identified railway hazard to causes, mitigations, responsible owner, verification evidence, residual risk status, and safety case argument.",
+                    "hazard": "HZ-RAIL-HAZLOG-001",
+                    "safety_goal": "SG-RAIL-HAZLOG-001",
+                    "source": "IEC 62278 / EN 50126 candidate reference: hazard analysis, risk evaluation, and hazard log management",
+                },
+                {
+                    "id": "REQ-RAIL-SW-001",
+                    "type": RequirementType.software_requirement.value,
+                    "text": f"The {system_type} software shall define safety integrity assumptions, design constraints, verification activities, test coverage evidence above 95 percent for safety-relevant logic, and change impact analysis before release.",
+                    "hazard": "HZ-RAIL-SW-001",
+                    "safety_goal": "SG-RAIL-SW-001",
+                    "source": "EN 50128 candidate reference: railway software lifecycle, verification, validation, and safety integrity clause area",
+                },
+                {
+                    "id": "REQ-RAIL-SAFETYCASE-001",
+                    "type": RequirementType.validation_requirement.value,
+                    "text": f"The {system_type} safety case shall provide traceable evidence from hazards to safety requirements, verification results, validation reports, open issues, approvals, and operational restrictions.",
+                    "hazard": "HZ-RAIL-CASE-001",
+                    "safety_goal": "SG-RAIL-CASE-001",
+                    "source": "EN 50129 / IEC 62425 candidate reference: safety case structure, evidence, and approval argument clause area",
+                },
+                {
+                    "id": "REQ-RAIL-ERTMS-001",
+                    "type": RequirementType.validation_requirement.value,
+                    "text": f"The {system_type} validation plan shall verify ERTMS operational scenarios, degraded modes, interface assumptions, timing constraints within 1 second where safety relevant, and recorded pass/fail evidence.",
+                    "hazard": "HZ-RAIL-ERTMS-001",
+                    "safety_goal": "SG-RAIL-ERTMS-001",
+                    "source": "ERTMS candidate reference: operational scenario validation, interfaces, degraded mode handling, and evidence review",
+                },
+            ]
+        )
+    if not templates:
+        templates.extend(
+            [
+                {
+                    "id": "REQ-SAFE-TRACE-001",
+                    "type": RequirementType.safety_requirement.value,
+                    "text": f"The {system_type} safety case shall trace each hazard to mitigations, measurable requirements, verification evidence, responsible owner, approval status, and residual risk decision.",
+                    "hazard": "HZ-SAFE-001",
+                    "safety_goal": "SG-SAFE-001",
+                    "source": "Generic safety engineering candidate reference: hazard traceability and safety case evidence",
+                },
+                {
+                    "id": "REQ-SAFE-VERIFY-001",
+                    "type": RequirementType.validation_requirement.value,
+                    "text": f"The {system_type} verification plan shall define objective pass/fail criteria, required evidence, test environment assumptions, and review gates for each safety-relevant requirement.",
+                    "hazard": "HZ-SAFE-002",
+                    "safety_goal": "SG-SAFE-002",
+                    "source": "Generic safety engineering candidate reference: verification planning and acceptance criteria",
                 },
             ]
         )

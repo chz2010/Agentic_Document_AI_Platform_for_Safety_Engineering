@@ -66,7 +66,15 @@ def test_upload_extract_query_and_traceability_csv():
             files={"file": ("aeb_requirements.txt", content, "text/plain")},
         )
         assert upload.status_code == 200
-        assert upload.json()["chunk_count"] >= 1
+        uploaded_document = upload.json()
+        assert uploaded_document["chunk_count"] >= 1
+
+        chunks = client.get(f"/projects/{project['id']}/documents/{uploaded_document['id']}/chunks")
+        assert chunks.status_code == 200
+        chunk_rows = chunks.json()
+        assert len(chunk_rows) == uploaded_document["chunk_count"]
+        assert chunk_rows[0]["chunk_id"].startswith(f"project-{project['id']}-doc-{uploaded_document['id']}-chunk-")
+        assert "partially occluded pedestrians" in chunk_rows[0]["text_preview"]
 
         extracted = client.post(f"/projects/{project['id']}/requirements/extract")
         assert extracted.status_code == 200
@@ -201,6 +209,49 @@ def test_generate_requirements_from_iso_standards():
         assert graph_body["coverage_summary"]["hazard_link_coverage"] == 1.0
         assert graph_body["coverage_summary"]["safety_goal_link_coverage"] == 1.0
         assert graph_body["coverage_summary"]["test_case_link_coverage"] == 1.0
+
+
+def test_domain_profiles_benchmark_and_graph_layout():
+    with TestClient(app) as client:
+        profiles = client.get("/domain-profiles")
+        assert profiles.status_code == 200
+        assert any(profile["id"] == "railway" for profile in profiles.json())
+
+        project = client.post(
+            "/projects",
+            json={
+                "name": "Railway Benchmark Project",
+                "domain": "Railway safety engineering",
+                "system_type": "ERTMS control system",
+                "standards_scope": ["IEC 62278 / EN 50126", "EN 50128", "EN 50129"],
+            },
+        ).json()
+
+        generated = client.post(
+            f"/projects/{project['id']}/requirements/generate-from-standards",
+            json={
+                "standards": ["IEC 62278 / EN 50126", "EN 50128", "EN 50129", "ERTMS"],
+                "replace_existing": True,
+            },
+        )
+        assert generated.status_code == 200
+        requirement_ids = {item["id"] for item in generated.json()["requirements"]}
+        assert "REQ-RAIL-RAMS-001" in requirement_ids
+        assert "REQ-RAIL-SAFETYCASE-001" in requirement_ids
+
+        benchmark = client.get(f"/projects/{project['id']}/benchmark/evaluate")
+        assert benchmark.status_code == 200
+        body = benchmark.json()
+        assert body["domain_profile"] == "Railway safety"
+        assert any(metric["name"] == "Average requirement quality" for metric in body["metrics"])
+        assert body["recommended_next_steps"]
+
+        layout = {"positions": {"project:1": {"x": 520.5, "y": 340.25}}}
+        saved = client.put(f"/projects/{project['id']}/knowledge-graph/layout", json=layout)
+        assert saved.status_code == 200
+        loaded = client.get(f"/projects/{project['id']}/knowledge-graph/layout")
+        assert loaded.status_code == 200
+        assert loaded.json()["positions"]["project:1"] == {"x": 520.5, "y": 340.2}
 
 
 def test_agent_operations_log_cost_failure_escalation_and_approval():

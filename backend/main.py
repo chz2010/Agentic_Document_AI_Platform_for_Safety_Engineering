@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import re
 import shutil
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from sqlmodel import Session, select
 from backend.agent_operations import build_operations_dashboard, create_agent_run_log, create_integration_event, run_mock_tool, update_approval
 from backend.analysis_intelligence import build_precision_review
 from backend.database import get_session, init_db
+from backend.domain_profiles import infer_domain_profile, list_domain_profiles
 from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
 from backend.models import AgentRunLogRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, Project, ProjectDocument, RequirementRecord, TestCaseRecord, WorkflowItemRecord
@@ -30,10 +32,15 @@ from backend.schemas import (
     AgentOperationsDashboard,
     AgentRunLogCreate,
     AgentRunLogRead,
+    BenchmarkEvaluationResponse,
+    BenchmarkMetric,
+    DocumentChunkRead,
     DocumentRead,
+    DomainProfile,
     EvaluationRun,
     IntegrationEventCreate,
     IntegrationEventRead,
+    KnowledgeGraphLayout,
     KnowledgeGraphResponse,
     ProjectCreate,
     ProjectRead,
@@ -92,6 +99,11 @@ def health() -> dict[str, str | bool]:
         "openai_configured": bool(settings.openai_api_key),
         "embedding_mode": "openai" if settings.openai_api_key else "local_hash",
     }
+
+
+@app.get("/domain-profiles", response_model=list[DomainProfile])
+def domain_profiles() -> list[dict]:
+    return list_domain_profiles()
 
 
 @app.post("/projects", response_model=ProjectRead)
@@ -202,6 +214,19 @@ async def upload_document(project_id: int, file: UploadFile = File(...), session
 def list_documents(project_id: int, session: Session = Depends(get_session)) -> list[ProjectDocument]:
     _project_or_404(project_id, session)
     return session.exec(select(ProjectDocument).where(ProjectDocument.project_id == project_id)).all()
+
+
+@app.get("/projects/{project_id}/documents/{document_id}/chunks", response_model=list[DocumentChunkRead])
+def list_document_chunks(project_id: int, document_id: int, session: Session = Depends(get_session)) -> list[DocumentChunk]:
+    _project_or_404(project_id, session)
+    document = session.get(ProjectDocument, document_id)
+    if not document or document.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return session.exec(
+        select(DocumentChunk)
+        .where(DocumentChunk.project_id == project_id, DocumentChunk.document_id == document_id)
+        .order_by(DocumentChunk.id)
+    ).all()
 
 
 @app.post("/projects/{project_id}/query", response_model=QueryResponse)
@@ -436,6 +461,77 @@ def get_knowledge_graph(project_id: int, session: Session = Depends(get_session)
         workflow_items=workflow_items,
         evaluation_runs=evaluation_runs,
         agent_runs=agent_runs,
+    )
+
+
+@app.get("/projects/{project_id}/knowledge-graph/layout", response_model=KnowledgeGraphLayout)
+def get_knowledge_graph_layout(project_id: int, session: Session = Depends(get_session)) -> KnowledgeGraphLayout:
+    _project_or_404(project_id, session)
+    return KnowledgeGraphLayout(positions=_read_graph_layout(project_id))
+
+
+@app.put("/projects/{project_id}/knowledge-graph/layout", response_model=KnowledgeGraphLayout)
+def save_knowledge_graph_layout(
+    project_id: int,
+    payload: KnowledgeGraphLayout,
+    session: Session = Depends(get_session),
+) -> KnowledgeGraphLayout:
+    _project_or_404(project_id, session)
+    cleaned = {
+        str(node_id): {
+            "x": round(float(position.get("x", 0.0)), 1),
+            "y": round(float(position.get("y", 0.0)), 1),
+        }
+        for node_id, position in payload.positions.items()
+        if isinstance(position, dict)
+    }
+    path = _graph_layout_path(project_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
+    return KnowledgeGraphLayout(positions=cleaned)
+
+
+@app.get("/projects/{project_id}/benchmark/evaluate", response_model=BenchmarkEvaluationResponse)
+def evaluate_project_benchmark(project_id: int, session: Session = Depends(get_session)) -> BenchmarkEvaluationResponse:
+    project = _project_or_404(project_id, session)
+    requirements = _stored_requirements(project_id, session)
+    traceability = build_traceability(requirements)
+    documents = session.exec(select(ProjectDocument).where(ProjectDocument.project_id == project_id)).all()
+    test_cases = session.exec(select(TestCaseRecord).where(TestCaseRecord.project_id == project_id)).all()
+    agent_runs = session.exec(select(AgentRunLogRecord).where(AgentRunLogRecord.project_id == project_id)).all()
+    profile = infer_domain_profile(project.domain, project.standards_scope)
+    req_count = len(requirements)
+    avg_quality = sum(req.quality_score for req in requirements) / req_count if req_count else 0.0
+    hazard_coverage = sum(1 for req in requirements if req.linked_hazard) / req_count if req_count else 0.0
+    safety_goal_coverage = sum(1 for req in requirements if req.linked_safety_goal) / req_count if req_count else 0.0
+    evidence_coverage = sum(1 for req in requirements if req.evidence_source) / req_count if req_count else 0.0
+    test_coverage = len({row.requirement_id for row in traceability if row.test_case_id}) / req_count if req_count else 0.0
+    agent_success = sum(1 for run in agent_runs if run.status in {"completed", "resolved"}) / len(agent_runs) if agent_runs else 0.0
+    metrics = [
+        _benchmark_metric("Document ingestion", 1.0 if documents else 0.0, 1.0, "At least one project document is uploaded and indexed."),
+        _benchmark_metric("Requirement volume", min(req_count / 8, 1.0), 1.0, "Eight or more requirements gives a useful demo register."),
+        _benchmark_metric("Average requirement quality", avg_quality, 0.75, "Mean quality score across extracted/generated requirements."),
+        _benchmark_metric("Hazard coverage", hazard_coverage, 0.8, "Share of requirements linked to hazards."),
+        _benchmark_metric("Safety goal coverage", safety_goal_coverage, 0.8, "Share of requirements linked to safety goals."),
+        _benchmark_metric("Test coverage", test_coverage, 0.7, "Share of requirements linked to generated test cases."),
+        _benchmark_metric("Evidence coverage", evidence_coverage, 0.7, "Share of requirements linked to evidence sources."),
+        _benchmark_metric("Agent run reliability", agent_success, 0.85, "Share of completed/resolved agent runs."),
+    ]
+    strengths = [metric.name for metric in metrics if metric.status == "pass"]
+    gaps = [f"{metric.name}: {metric.description}" for metric in metrics if metric.status != "pass"]
+    next_steps = [
+        "Upload at least one domain-relevant requirements or safety case document." if not documents else "",
+        "Generate test cases after requirement extraction." if not test_cases else "",
+        "Review requirements with low quality or missing hazard/safety-goal links.",
+        f"Use the {profile['name']} profile review lens: {profile['review_lens']}",
+    ]
+    return BenchmarkEvaluationResponse(
+        project_id=project_id,
+        domain_profile=profile["name"],
+        metrics=metrics,
+        strengths=strengths,
+        gaps=gaps,
+        recommended_next_steps=[step for step in next_steps if step],
     )
 
 
@@ -757,6 +853,43 @@ def _delete_project_uploads(project_id: int) -> None:
     project_upload_dir = settings.uploads_dir / str(project_id)
     if project_upload_dir.exists():
         shutil.rmtree(project_upload_dir)
+    _graph_layout_path(project_id).unlink(missing_ok=True)
+
+
+def _graph_layout_path(project_id: int) -> Path:
+    return Path(settings.uploads_dir).parent / "graph_layouts" / f"project_{project_id}.json"
+
+
+def _read_graph_layout(project_id: int) -> dict[str, dict[str, float]]:
+    path = _graph_layout_path(project_id)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, dict[str, float]] = {}
+    for node_id, position in data.items():
+        if not isinstance(position, dict):
+            continue
+        try:
+            cleaned[str(node_id)] = {"x": float(position["x"]), "y": float(position["y"])}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return cleaned
+
+
+def _benchmark_metric(name: str, value: float, target: float, description: str) -> BenchmarkMetric:
+    normalized = round(max(0.0, min(1.0, value)), 3)
+    return BenchmarkMetric(
+        name=name,
+        value=normalized,
+        target=target,
+        status="pass" if normalized >= target else "needs_work",
+        description=description,
+    )
 
 
 def _agent_run_or_404(project_id: int, agent_run_id: int, session: Session) -> AgentRunLogRecord:

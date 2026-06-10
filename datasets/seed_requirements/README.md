@@ -12,6 +12,9 @@ the requirements engineering workflow.
 - `automotive_safety_requirements.csv`: table view for spreadsheet inspection.
 - `automotive_safety_requirements.md`: document-style source for upload and RAG
   demonstrations.
+- `lidar_perception_safety_case.md`: synthetic LiDAR perception safety-case
+  document with hazards, safety goals, strong requirements, intentionally weak
+  requirements, evidence sources, and test cases.
 
 ## Suggested Demo Flow
 

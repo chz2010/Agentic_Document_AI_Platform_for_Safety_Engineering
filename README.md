@@ -26,12 +26,15 @@ Compose.
 - FastAPI backend engineering
 - API design for project workspaces and document upload
 - Project-specific RAG over uploaded safety documents
+- Domain profiles for automotive, railway, and generic safety engineering
 - Structured Pydantic outputs for safety analysis and requirements engineering
 - Requirement extraction, classification, and quality scoring
 - Traceability matrix and test-case generation
 - Lightweight traceability knowledge graph connecting projects, documents,
   evidence, requirements, hazards, safety goals, test cases, workflow items,
-  evaluation runs, and agent runs
+  evaluation runs, and agent runs, with draggable persisted node layouts
+- Benchmark readiness metrics for ingestion, requirement quality, traceability
+  coverage, evidence coverage, test coverage, and agent reliability
 - Evaluation run history for MLOps-style monitoring
 - Agent operations module with run logs, cost tracking, failure reasons,
   human escalation flags, approval gates, evaluation scores, and prompt/version
@@ -142,12 +145,14 @@ transcripts are used only as educational context, not official standard text.
 ## Main Endpoints
 
 ```text
+GET  /domain-profiles
 POST /projects
 GET  /projects
 GET  /projects/{project_id}
 DELETE /projects/{project_id}
 POST /projects/{project_id}/documents
 GET  /projects/{project_id}/documents
+GET  /projects/{project_id}/documents/{document_id}/chunks
 POST /projects/{project_id}/query
 POST /projects/{project_id}/safety-analysis
 POST /projects/{project_id}/requirements/extract
@@ -158,6 +163,9 @@ POST /projects/{project_id}/retrieval/search
 POST /projects/{project_id}/analysis/precision-review
 GET  /projects/{project_id}/traceability
 GET  /projects/{project_id}/knowledge-graph
+GET  /projects/{project_id}/knowledge-graph/layout
+PUT  /projects/{project_id}/knowledge-graph/layout
+GET  /projects/{project_id}/benchmark/evaluate
 POST /projects/{project_id}/test-cases/generate
 GET  /projects/{project_id}/evaluation-runs
 POST /projects/{project_id}/agent-runs

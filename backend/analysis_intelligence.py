@@ -66,6 +66,30 @@ ISO_REFERENCE_RULES = [
             ("ISO 8800", "AI safety lifecycle clause area", "AI safety assurance, data, validation, and monitoring"),
         ],
     },
+    {
+        "keywords": {"rams", "railway", "hazard log", "lifecycle", "residual risk", "acceptance criteria"},
+        "references": [
+            ("IEC 62278 / EN 50126", "RAMS lifecycle clause area", "Railway RAMS process, hazard analysis, and risk acceptance"),
+        ],
+    },
+    {
+        "keywords": {"software", "sil", "railway software", "verification", "validation", "change impact"},
+        "references": [
+            ("EN 50128", "Software lifecycle clause area", "Railway software safety integrity, verification, validation, and change control"),
+        ],
+    },
+    {
+        "keywords": {"safety case", "approval", "authorization", "evidence", "argument"},
+        "references": [
+            ("EN 50129 / IEC 62425", "Safety case clause area", "Railway safety case evidence, approval, and structured safety argument"),
+        ],
+    },
+    {
+        "keywords": {"ertms", "etcs", "degraded mode", "interface", "operational scenario", "train control"},
+        "references": [
+            ("ERTMS", "Operational scenario clause area", "ERTMS operational scenarios, interfaces, degraded modes, and validation evidence"),
+        ],
+    },
 ]
 
 
@@ -307,6 +331,14 @@ def map_iso_references(text: str, standards: list[str]) -> list[StandardReferenc
             if "iso 21448" in standard.lower() and "21448" not in requested and "sotif" not in requested:
                 continue
             if "iso 8800" in standard.lower() and "8800" not in requested:
+                continue
+            if "50126" in standard.lower() and "50126" not in requested and "62278" not in requested and "rail" not in requested:
+                continue
+            if "50128" in standard.lower() and "50128" not in requested and "rail" not in requested:
+                continue
+            if ("50129" in standard.lower() or "62425" in standard.lower()) and not any(term in requested for term in ["50129", "62425", "rail"]):
+                continue
+            if "ertms" in standard.lower() and "ertms" not in requested and "rail" not in requested:
                 continue
             references.append(
                 StandardReference(

@@ -34,12 +34,34 @@ class ProjectRead(ProjectCreate):
     created_at: datetime
 
 
+class DomainProfile(BaseModel):
+    id: str
+    name: str
+    domain: str
+    system_type: str
+    standards: list[str]
+    default_standards: list[str]
+    review_lens: str
+    requirement_prefix: str
+
+
 class DocumentRead(BaseModel):
     id: int
     project_id: int
     filename: str
     source_type: str
     chunk_count: int
+    created_at: datetime
+
+
+class DocumentChunkRead(BaseModel):
+    id: int
+    project_id: int
+    document_id: int
+    chunk_id: str
+    page: int | None = None
+    section: str | None = None
+    text_preview: str
     created_at: datetime
 
 
@@ -138,6 +160,10 @@ class KnowledgeGraphResponse(BaseModel):
     node_count: int
     edge_count: int
     coverage_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeGraphLayout(BaseModel):
+    positions: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 class TestCase(BaseModel):
@@ -258,6 +284,23 @@ class PrecisionReviewResponse(BaseModel):
     iso_references: list[StandardReference]
     confidence_score: float
     confidence_rationale: str
+
+
+class BenchmarkMetric(BaseModel):
+    name: str
+    value: float
+    target: float
+    status: str
+    description: str
+
+
+class BenchmarkEvaluationResponse(BaseModel):
+    project_id: int
+    domain_profile: str
+    metrics: list[BenchmarkMetric]
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    recommended_next_steps: list[str] = Field(default_factory=list)
 
 
 class RequirementEvaluateRequest(BaseModel):

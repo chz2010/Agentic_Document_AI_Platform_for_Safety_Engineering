@@ -886,6 +886,37 @@ def load_projects() -> list[dict[str, Any]]:
     return api_request("GET", "/projects")
 
 
+def load_domain_profiles() -> list[dict[str, Any]]:
+    try:
+        return api_request("GET", "/domain-profiles")
+    except requests.HTTPError:
+        return [
+            {
+                "id": "automotive",
+                "name": "Automotive safety",
+                "domain": "Autonomous driving",
+                "system_type": "ADAS / automated driving function",
+                "standards": ["ISO 26262", "ISO 21448", "ISO 8800", "NCAP", "IIHS"],
+                "default_standards": ["ISO 26262", "ISO 21448", "ISO 8800"],
+                "review_lens": "Functional safety, SOTIF, AI assurance, ODD coverage, scenario validation, and perception monitoring.",
+            }
+        ]
+
+
+def project_domain_profile(project: dict[str, Any], profiles: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    profiles = profiles or load_domain_profiles()
+    haystack = f"{project.get('domain', '')} {' '.join(project.get('standards_scope') or [])}".lower()
+    for profile in profiles:
+        profile_text = f"{profile.get('id', '')} {profile.get('domain', '')} {' '.join(profile.get('standards', []))}".lower()
+        if any(term in haystack for term in profile_text.split() if len(term) > 4):
+            return profile
+    if any(term in haystack for term in ["rail", "ertms", "62278", "50126", "50128", "50129"]):
+        return next((profile for profile in profiles if profile.get("id") == "railway"), profiles[0])
+    if any(term in haystack for term in ["auto", "adas", "26262", "21448", "8800", "sotif"]):
+        return next((profile for profile in profiles if profile.get("id") == "automotive"), profiles[0])
+    return next((profile for profile in profiles if profile.get("id") == "generic"), profiles[0])
+
+
 def selected_project(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not projects:
         return None
@@ -991,18 +1022,22 @@ def render_project_sidebar() -> dict[str, Any] | None:
     selected_page = render_navigation()
     st.session_state["selected_page"] = selected_page
 
+    profiles = load_domain_profiles()
     st.sidebar.markdown("<div class='nav-label'>Project</div>", unsafe_allow_html=True)
     with st.sidebar.expander("Create project", expanded=False):
         with st.form("create_project"):
+            profile_names = [profile["name"] for profile in profiles]
+            selected_profile_name = st.selectbox("Domain profile", profile_names)
+            selected_profile = next(profile for profile in profiles if profile["name"] == selected_profile_name)
             name = st.text_input("Project name", value="AEB Pedestrian Safety Case")
-            domain = st.text_input("Domain", value="Autonomous driving")
-            system_type = st.text_input("System type", value="AEB")
+            domain = st.text_input("Domain", value=selected_profile["domain"])
+            system_type = st.text_input("System type", value=selected_profile["system_type"])
             standards = st.multiselect(
                 "Standards scope",
-                ["ISO 26262", "ISO 21448", "ISO 8800", "NCAP", "IIHS"],
-                default=["ISO 26262", "ISO 21448", "ISO 8800"],
+                selected_profile["standards"],
+                default=selected_profile["default_standards"],
             )
-            description = st.text_area("Description", value="Safety engineering workspace for AEB pedestrian detection.")
+            description = st.text_area("Description", value=f"{selected_profile['review_lens']} Project workspace for evidence, requirements, traceability, and agent operations.")
             submitted = st.form_submit_button("Create")
         if submitted:
             api_request(
@@ -1109,6 +1144,45 @@ def render_overview(project: dict[str, Any]) -> None:
         with chart_cols[1]:
             overview_quality_chart(ordered_runs)
 
+    st.markdown("<div class='grafana-panel-title'>Benchmark readiness</div>", unsafe_allow_html=True)
+    benchmark = api_request("GET", f"/projects/{project['id']}/benchmark/evaluate")
+    st.caption(f"Domain profile: {benchmark['domain_profile']}")
+    benchmark_rows = benchmark.get("metrics", [])
+    benchmark_cols = st.columns(2)
+    with benchmark_cols[0]:
+        horizontal_bar_chart(
+            benchmark_rows,
+            "value",
+            "name",
+            "Project Readiness Metrics",
+            color="status",
+            x_title="Score",
+            y_title="Metric",
+        )
+    with benchmark_cols[1]:
+        wrapped_table(
+            benchmark_rows,
+            ["name", "value", "target", "status", "description"],
+            labels={
+                "name": "Metric",
+                "value": "Score",
+                "target": "Target",
+                "status": "Status",
+                "description": "What it checks",
+            },
+            widths={
+                "name": "col-medium",
+                "value": "col-score",
+                "target": "col-score",
+                "status": "col-small",
+                "description": "col-text",
+            },
+        )
+    if benchmark.get("gaps"):
+        st.markdown("#### Recommended Next Steps")
+        for step in benchmark.get("recommended_next_steps", []):
+            st.info(step)
+
     st.markdown("<div class='grafana-panel-title'>Project documents</div>", unsafe_allow_html=True)
     wrapped_table(
         dataframe(docs, ["id", "filename", "source_type", "chunk_count", "created_at"]),
@@ -1131,15 +1205,85 @@ def render_documents(project: dict[str, Any]) -> None:
         st.rerun()
 
     docs = api_request("GET", f"/projects/{project['id']}/documents")
-    st.dataframe(
+    st.markdown("<div class='grafana-panel-title'>Indexed documents</div>", unsafe_allow_html=True)
+    wrapped_table(
         dataframe(docs, ["id", "filename", "source_type", "chunk_count", "created_at"]),
-        use_container_width=True,
-        hide_index=True,
+        ["id", "filename", "source_type", "chunk_count", "created_at"],
+        labels={"id": "ID", "filename": "Document", "source_type": "Type", "chunk_count": "Chunks", "created_at": "Created"},
+        widths={"id": "col-id", "filename": "col-text", "source_type": "col-small", "chunk_count": "col-small", "created_at": "col-medium"},
     )
+    if not docs:
+        st.info("Upload a document to see the extracted chunks used for retrieval.")
+        return
+
+    st.markdown("<div class='grafana-panel-title'>Chunk inspector</div>", unsafe_allow_html=True)
+    document_options = {
+        f"{doc['filename']} ({doc['chunk_count']} chunks)": doc
+        for doc in docs
+    }
+    selected_label = st.selectbox(
+        "Inspect chunks for document",
+        list(document_options.keys()),
+        help="Shows the text previews stored after parsing and chunking. These chunks are what retrieval searches later.",
+    )
+    selected_doc = document_options[selected_label]
+    chunks = api_request("GET", f"/projects/{project['id']}/documents/{selected_doc['id']}/chunks")
+    chunk_count = len(chunks)
+    chunk_cols = st.columns(4)
+    chunk_cols[0].metric("Chunks", chunk_count)
+    chunk_cols[1].metric("Document ID", selected_doc["id"])
+    chunk_cols[2].metric("Type", selected_doc["source_type"])
+    chunk_cols[3].metric("Avg preview chars", round(sum(len(chunk.get("text_preview", "")) for chunk in chunks) / chunk_count) if chunk_count else 0)
+    if not chunks:
+        st.warning("No chunks were stored for this document.")
+        return
+
+    chunk_rows = [
+        {
+            "chunk_id": chunk["chunk_id"],
+            "page": chunk.get("page") or "—",
+            "section": chunk.get("section") or "—",
+            "text_preview": chunk.get("text_preview", ""),
+            "created_at": chunk.get("created_at"),
+        }
+        for chunk in chunks
+    ]
+    wrapped_table(
+        chunk_rows,
+        ["chunk_id", "page", "section", "text_preview", "created_at"],
+        labels={
+            "chunk_id": "Chunk ID",
+            "page": "Page",
+            "section": "Section",
+            "text_preview": "Text preview",
+            "created_at": "Created",
+        },
+        widths={
+            "chunk_id": "col-medium",
+            "page": "col-id",
+            "section": "col-medium",
+            "text_preview": "col-text",
+            "created_at": "col-medium",
+        },
+    )
+    with st.expander("Open full chunk previews", expanded=False):
+        chunk_labels = [f"{index}. {chunk['chunk_id']}" for index, chunk in enumerate(chunks, start=1)]
+        selected_chunk_label = st.radio("Chunk", chunk_labels, label_visibility="collapsed")
+        selected_index = chunk_labels.index(selected_chunk_label)
+        selected_chunk = chunks[selected_index]
+        st.caption(
+            f"{selected_chunk['chunk_id']} | page: {selected_chunk.get('page') or '—'} | "
+            f"section: {selected_chunk.get('section') or '—'}"
+        )
+        st.code(selected_chunk.get("text_preview", ""), language="markdown")
 
 
 def render_query(project: dict[str, Any]) -> None:
     st.subheader("Ask a Safety or Requirements Question")
+    profile = project_domain_profile(project)
+    standard_options = profile.get("standards") or project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"]
+    default_standards = project.get("standards_scope") or profile.get("default_standards") or standard_options[:3]
+    st.caption(f"Domain profile: {profile['name']} | Review lens: {profile['review_lens']}")
     question = st.text_area(
         "Question",
         value="Are the requirements complete for occluded pedestrian detection at night?",
@@ -1147,8 +1291,8 @@ def render_query(project: dict[str, Any]) -> None:
     )
     standards = st.multiselect(
         "Standards context",
-        ["ISO 26262", "ISO 21448", "ISO 8800", "NCAP", "IIHS"],
-        default=["ISO 26262", "ISO 21448", "ISO 8800"],
+        standard_options,
+        default=[standard for standard in default_standards if standard in standard_options] or standard_options[:3],
     )
     include_review = st.checkbox("Include requirements review", value=True)
     answer_engine_options = {
@@ -1283,15 +1427,19 @@ def render_retrieval(project: dict[str, Any]) -> None:
 
 def render_precision_review(project: dict[str, Any]) -> None:
     st.subheader("Precision Review")
+    profile = project_domain_profile(project)
+    standard_options = profile.get("standards") or project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"]
+    default_standards = project.get("standards_scope") or profile.get("default_standards") or standard_options[:3]
+    st.caption(f"Domain profile: {profile['name']} | Review lens: {profile['review_lens']}")
     query = st.text_area(
         "Review question",
         value="Is night occluded pedestrian detection supported by evidence, requirements, traceability, and ISO clauses?",
         height=90,
     )
     standards = st.multiselect(
-        "Standards for candidate clause references",
-        ["ISO 26262", "ISO 21448", "ISO 8800"],
-        default=project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"],
+        "Standards for candidate reference mapping",
+        standard_options,
+        default=[standard for standard in default_standards if standard in standard_options] or standard_options[:3],
     )
     top_k = st.slider("Evidence items", 1, 10, 5, key="precision_top_k")
     if st.button("Run precision review", type="primary"):
@@ -1507,21 +1655,24 @@ def render_iso_reference_table(references: list[dict[str, Any]]) -> None:
 
 def render_requirements(project: dict[str, Any]) -> None:
     st.subheader("Requirements Engineering")
+    profile = project_domain_profile(project)
+    standard_options = profile.get("standards") or project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"]
+    default_standards = project.get("standards_scope") or profile.get("default_standards") or standard_options[:3]
     stored_traceability = api_request("GET", f"/projects/{project['id']}/traceability")
     stored_count = len(stored_traceability)
     st.caption(
         f"Stored requirements for this project: {stored_count}. "
-        "If this is zero, extract requirements from uploaded documents first."
+        f"Active profile: {profile['name']}. If this is zero, extract requirements from uploaded documents first."
     )
 
     standard_defaults = [
         standard
-        for standard in ["ISO 26262", "ISO 21448", "ISO 8800"]
-        if standard in (project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"])
-    ] or ["ISO 26262", "ISO 21448", "ISO 8800"]
+        for standard in standard_options
+        if standard in default_standards
+    ] or standard_options[:3]
     selected_iso_standards = st.multiselect(
-        "ISO standards for starter requirement generation",
-        ["ISO 26262", "ISO 21448", "ISO 8800"],
+        "Standards/profile references for starter requirement generation",
+        standard_options,
         default=standard_defaults,
     )
     replace_iso_requirements = st.checkbox("Replace stored requirements with ISO starter set", value=False)
@@ -1531,7 +1682,7 @@ def render_requirements(project: dict[str, Any]) -> None:
         st.session_state["requirements_result"] = api_request("POST", f"/projects/{project['id']}/requirements/extract")
         st.session_state["quality_review"] = quality_review(st.session_state["requirements_result"].get("requirements", []))
         st.session_state.pop("test_cases", None)
-    if actions[1].button("Generate ISO starter requirements", use_container_width=True):
+    if actions[1].button("Generate starter requirements", use_container_width=True):
         st.session_state["requirements_result"] = api_request(
             "POST",
             f"/projects/{project['id']}/requirements/generate-from-standards",
@@ -1542,7 +1693,7 @@ def render_requirements(project: dict[str, Any]) -> None:
         )
         st.session_state["quality_review"] = quality_review(st.session_state["requirements_result"].get("requirements", []))
         st.session_state.pop("test_cases", None)
-        st.info("Generated candidate requirements from ISO clause areas. Review them against licensed standards before production use.")
+        st.info("Generated candidate requirements from profile/standard reference areas. Review them against licensed standards before production use.")
     if actions[2].button("Generate test cases", use_container_width=True):
         if stored_count == 0:
             st.info("No stored requirements found. Extracting requirements before test-case generation.")
@@ -1873,7 +2024,8 @@ def render_knowledge_graph(project: dict[str, Any]) -> None:
         return
 
     st.markdown("<div class='grafana-panel-title'>Interactive relationship map</div>", unsafe_allow_html=True)
-    render_interactive_knowledge_graph(nodes, edges)
+    saved_layout = api_request("GET", f"/projects/{project['id']}/knowledge-graph/layout").get("positions", {})
+    render_interactive_knowledge_graph(project["id"], nodes, edges, saved_layout)
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
@@ -1919,7 +2071,12 @@ def render_knowledge_graph(project: dict[str, Any]) -> None:
     )
 
 
-def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+def render_interactive_knowledge_graph(
+    project_id: int,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    saved_layout: dict[str, dict[str, float]] | None = None,
+) -> None:
     color_map = {
         "project": "#6ecbff",
         "document": "#a78bfa",
@@ -2001,6 +2158,14 @@ def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[
                 "size": 6.4 if node_type in {"evaluation_run", "agent_run"} else 7.2,
             }
 
+    for node_id, position in (saved_layout or {}).items():
+        if node_id in positioned:
+            try:
+                positioned[node_id]["x"] = max(22.0, min(898.0, float(position["x"])))
+                positioned[node_id]["y"] = max(22.0, min(658.0, float(position["y"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+
     relationship_rows = [
         row
         for row in graph_relationship_rows(visible_nodes, edges)
@@ -2053,6 +2218,7 @@ def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[
         },
         ensure_ascii=True,
     )
+    api_url_json = json.dumps(st.session_state.get("api_url", DEFAULT_API_URL).rstrip("/"), ensure_ascii=True)
 
     legend_items = "".join(
         f"""
@@ -2251,6 +2417,9 @@ def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[
         const detail = document.getElementById("kg-detail");
         const svg = document.querySelector(".kg-canvas");
         const nodePositions = {node_positions_json};
+        const apiUrl = {api_url_json};
+        const projectId = {int(project_id)};
+        let saveTimer = null;
         const htmlEscape = (value) => String(value ?? "")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
@@ -2277,6 +2446,16 @@ def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[
               line.setAttribute("y2", position.y);
             }}
           }});
+        }};
+        const scheduleSave = () => {{
+          window.clearTimeout(saveTimer);
+          saveTimer = window.setTimeout(() => {{
+            fetch(`${{apiUrl}}/projects/${{projectId}}/knowledge-graph/layout`, {{
+              method: "PUT",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ positions: nodePositions }}),
+            }}).catch(() => {{}});
+          }}, 450);
         }};
         let activeNode = null;
         document.querySelectorAll(".kg-node").forEach((node) => {{
@@ -2307,6 +2486,7 @@ def render_interactive_knowledge_graph(nodes: list[dict[str, Any]], edges: list[
             nodePositions[activeNode.nodeId] = next;
             node.setAttribute("transform", `translate(${{next.x}} ${{next.y}})`);
             updateConnectedEdges(activeNode.nodeId);
+            scheduleSave();
           }});
           const clearDrag = (event) => {{
             if (!activeNode || activeNode.element !== node) return;
