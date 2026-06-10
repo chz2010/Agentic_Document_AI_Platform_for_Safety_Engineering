@@ -17,38 +17,28 @@ project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
 
-Documents
-     │
-     ▼
-+----------------+
-|  Ingestion     |
-+----------------+
-     │
-     ▼
-+----------------+     +----------------+
-| Vector Store   |<--->| KnowledgeGraph |
-+----------------+     +----------------+
-           │
-           ▼
-+-------------------------------+
-|      Agentic AI Layer         |
-+-------------------------------+
-           │
-           ▼
-+-------------------------------+
-|        AgentOps Layer         |
-+-------------------------------+
-           │
-           ▼
-+-------------------------------+
-| Workflow / GitHub / Jira      |
-+-------------------------------+
-           │
-           ▼
-+-------------------------------+
-|          Reports              |
-+-------------------------------+
-                
+```mermaid
+flowchart TD
+
+A[Documents]
+B[Ingestion]
+C[Vector Store]
+D[Knowledge Graph]
+E[Agentic AI Layer]
+F[AgentOps Layer]
+G[Workflow / GitHub / Jira]
+H[Reports]
+
+A --> B
+B --> C
+B --> D
+C <--> D
+C --> E
+D --> E
+E --> F
+F --> G
+G --> H
+```
           
 ## Project Roadmap
 
