@@ -16,18 +16,18 @@ Engineering platform with FastAPI, project workspaces, PDF upload,
 project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
-
 ```mermaid
 flowchart TD
 
-A[Documents]
-B[Ingestion]
+A[Project Documents]
+B[Ingestion & Embeddings]
 C[Vector Store]
 D[Knowledge Graph]
-E[Agentic AI Layer]
-F[AgentOps Layer]
-G[Workflow / GitHub / Jira]
-H[Reports]
+E[RAG & Agentic AI]
+F[Requirements & Safety Analysis]
+G[AgentOps & Evaluation]
+H[Workflow & Integrations]
+I[Reports]
 
 A --> B
 B --> C
@@ -38,8 +38,8 @@ D --> E
 E --> F
 F --> G
 G --> H
-```
-          
+H --> I
+```       
 ## Project Roadmap
 
 ![Project roadmap](docs/project_roadmap.svg)
