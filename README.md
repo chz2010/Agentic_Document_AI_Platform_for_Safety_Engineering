@@ -16,7 +16,38 @@ Engineering platform with FastAPI, project workspaces, PDF upload,
 project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
-![Project Architecture](docs/image.png)
+
+Documents
+     │
+     ▼
++----------------+
+|  Ingestion     |
++----------------+
+     │
+     ▼
++----------------+     +----------------+
+| Vector Store   |<--->| KnowledgeGraph |
++----------------+     +----------------+
+           │
+           ▼
++-------------------------------+
+|      Agentic AI Layer         |
++-------------------------------+
+           │
+           ▼
++-------------------------------+
+|        AgentOps Layer         |
++-------------------------------+
+           │
+           ▼
++-------------------------------+
+| Workflow / GitHub / Jira      |
++-------------------------------+
+           │
+           ▼
++-------------------------------+
+|          Reports              |
++-------------------------------+
                 
           
 ## Project Roadmap
