@@ -88,6 +88,177 @@ flowchart TD
     end
 ```
 
+## Database Diagram
+
+```mermaid
+erDiagram
+    PROJECT ||--o{ DOCUMENT : owns
+    PROJECT ||--o{ DOCUMENT_CHUNK : indexes
+    PROJECT ||--o{ REQUIREMENT : contains
+    PROJECT ||--o{ HAZARD : tracks
+    PROJECT ||--o{ SAFETY_GOAL : defines
+    PROJECT ||--o{ TEST_CASE : validates
+    PROJECT ||--o{ TRACEABILITY_LINK : maps
+    PROJECT ||--o{ EVALUATION_RUN : records
+    PROJECT ||--o{ AGENT_RUN : audits
+    PROJECT ||--o{ WORKFLOW_ITEM : manages
+    DOCUMENT ||--o{ DOCUMENT_CHUNK : produces
+    DOCUMENT_CHUNK ||--o{ REQUIREMENT : supports
+    HAZARD ||--o{ SAFETY_GOAL : mitigated_by
+    SAFETY_GOAL ||--o{ REQUIREMENT : refined_by
+    REQUIREMENT ||--o{ TEST_CASE : verified_by
+    REQUIREMENT ||--o{ TRACEABILITY_LINK : source
+    TEST_CASE ||--o{ TRACEABILITY_LINK : target
+    AGENT_RUN ||--o{ WORKFLOW_ITEM : creates
+
+    PROJECT {
+        int id
+        string name
+        string domain
+        string system_type
+        string standards_scope
+    }
+    DOCUMENT {
+        int id
+        int project_id
+        string filename
+        string source_type
+    }
+    REQUIREMENT {
+        int id
+        int project_id
+        string requirement_id
+        string type
+        float quality_score
+    }
+    AGENT_RUN {
+        int id
+        int project_id
+        string operation
+        string model
+        string status
+        float cost_estimate
+    }
+```
+
+## API Documentation
+
+FastAPI exposes interactive Swagger documentation at `/docs`. The main API
+surface is organized around project workspaces, document ingestion, retrieval,
+requirements engineering, traceability, AgentOps, model selection, memory, and
+observability.
+
+```mermaid
+flowchart TD
+    A[Client or Streamlit UI] --> B[Authentication APIs]
+    A --> C[Project APIs]
+    C --> D[Document APIs]
+    D --> E[Query and Retrieval APIs]
+    E --> F[Requirements APIs]
+    F --> G[Traceability and Test Case APIs]
+    G --> H[Report APIs]
+    E --> I[Agent Tool APIs]
+    I --> J[AgentOps Dashboard APIs]
+    J --> K[Metrics and Health APIs]
+
+    B --> B1["POST /auth/login<br/>POST /auth/refresh<br/>GET /users/me"]
+    C --> C1["POST /projects<br/>GET /projects<br/>DELETE /projects/{id}"]
+    D --> D1["POST /documents<br/>GET /documents<br/>GET /documents/{id}/chunks"]
+    E --> E1["POST /query<br/>POST /retrieval/search<br/>POST /analysis/precision-review"]
+    F --> F1["POST /requirements/extract<br/>POST /requirements/generate<br/>POST /requirements/evaluate"]
+    G --> G1["GET /traceability<br/>POST /test-cases/generate<br/>GET /knowledge-graph"]
+    J --> J1["POST /agent-runs<br/>GET /agent-runs<br/>PATCH /approval"]
+    K --> K1["GET /health<br/>GET /metrics<br/>GET /models"]
+```
+
+## Agent Flow Diagram
+
+```mermaid
+flowchart TD
+    A[User Request] --> B[Create Agent Run]
+    B --> C[Select Model and Prompt Version]
+    C --> D[Run Tool Orchestration]
+
+    subgraph Tools["Available Agent Tools"]
+        D --> T1[search_project_docs]
+        D --> T2[extract_requirements]
+        D --> T3[evaluate_requirements]
+        D --> T4[generate_traceability]
+        D --> T5[generate_test_cases]
+        D --> T6[create_issue_ticket]
+    end
+
+    T1 --> E[Compose Evidence]
+    T2 --> E
+    T3 --> E
+    T4 --> E
+    T5 --> E
+    T6 --> E
+
+    E --> F[Generate Structured Output]
+    F --> G[Evaluate Confidence and Hallucination Risk]
+    G --> H{Approval Gate}
+    H -->|Pass| I[Resolved Output]
+    H -->|Needs Review| J[Human Escalation]
+    H -->|Blocked| K[Failure Reason Tracking]
+    I --> L[Store AgentOps Metrics]
+    J --> L
+    K --> L
+```
+
+## Knowledge Graph Diagram
+
+```mermaid
+flowchart LR
+    P[Project] --> D[Documents]
+    D --> E[Evidence Chunks]
+    E --> R[Requirements]
+    R --> H[Hazards]
+    H --> SG[Safety Goals]
+    SG --> R
+    R --> TC[Test Cases]
+    TC --> EV[Verification Evidence]
+    R --> W[Workflow Items]
+    AR[Agent Runs] --> R
+    AR --> W
+    ER[Evaluation Runs] --> R
+    ER --> AR
+
+    classDef project fill:#dbeafe,stroke:#60a5fa,color:#0f172a;
+    classDef evidence fill:#fef3c7,stroke:#f59e0b,color:#0f172a;
+    classDef safety fill:#dcfce7,stroke:#22c55e,color:#0f172a;
+    classDef ops fill:#f3e8ff,stroke:#a855f7,color:#0f172a;
+    class P project;
+    class D,E evidence;
+    class R,H,SG,TC,EV safety;
+    class W,AR,ER ops;
+```
+
+## RAG Pipeline Diagram
+
+```mermaid
+flowchart TD
+    A[Uploaded Technical Documents] --> B[Text Extraction]
+    B --> C[Chunking and Metadata Capture]
+    C --> D[Embedding Generation]
+    D --> E[Chroma Vector Store]
+    C --> F[PostgreSQL Metadata]
+
+    G[User Question] --> H[Project Filter]
+    H --> I[Multi-Source Retrieval]
+    E --> I
+    F --> I
+    J[Requirements Table] --> I
+    K[Traceability Matrix] --> I
+    L[Evaluation and Agent Run Logs] --> I
+
+    I --> M[Precision Review and Reranking]
+    M --> N[Context Compression]
+    N --> O[Answer Engine]
+    O --> P[Structured Answer with Sources]
+    P --> Q[Evaluation History and AgentOps Log]
+```
+
 ## What This Project Shows
 
 - FastAPI backend engineering
