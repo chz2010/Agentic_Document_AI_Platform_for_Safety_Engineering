@@ -30,6 +30,63 @@ def test_health_and_project_create_list():
         assert any(project["id"] == project_id for project in list_response.json())
 
 
+def test_auth_memory_model_registry_versions_and_metrics():
+    with TestClient(app) as client:
+        login = client.post(
+            "/auth/login",
+            json={"username": settings.demo_username, "password": settings.demo_password},
+        )
+        assert login.status_code == 200
+        tokens = login.json()
+        assert tokens["access_token"]
+        assert tokens["refresh_token"]
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        me = client.get("/users/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["username"] == settings.demo_username
+
+        refreshed = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        assert refreshed.status_code == 200
+        refreshed_headers = {"Authorization": f"Bearer {refreshed.json()['access_token']}"}
+
+        memory = client.post(
+            "/agent-memory",
+            headers=refreshed_headers,
+            json={"key": "demo_context", "value": "Use candidate standards references only.", "tags": ["demo", "governance"]},
+        )
+        assert memory.status_code == 200
+        assert memory.json()["created_by"] == settings.demo_username
+
+        memories = client.get("/agent-memory", headers=refreshed_headers)
+        assert memories.status_code == 200
+        assert any(item["key"] == "demo_context" for item in memories.json())
+
+        models = client.get("/models")
+        assert models.status_code == 200
+        assert any(model["model_name"] == "deterministic-evidence-synthesis" for model in models.json())
+
+        selected = client.post(
+            "/models/select",
+            headers=refreshed_headers,
+            json={"answer_mode": "none", "model_name": "deterministic-evidence-synthesis"},
+        )
+        assert selected.status_code == 200
+        assert selected.json()["model_name"] == "deterministic-evidence-synthesis"
+
+        versions = client.get("/agent-versions")
+        assert versions.status_code == 200
+        assert {item["agent_name"] for item in versions.json()} >= {"project_rag_agent", "requirements_agent"}
+
+        metrics = client.get("/metrics")
+        assert metrics.status_code == 200
+        assert "safety_platform_projects_total" in metrics.text
+
+        health = client.get("/health").json()
+        assert health["auth_enabled"] is True
+        assert health["model_registry_enabled"] is True
+
+
 def test_project_delete_removes_project_from_workspace():
     with TestClient(app) as client:
         project = client.post(

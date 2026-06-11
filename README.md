@@ -69,6 +69,56 @@ flowchart TD
 
 ![Project roadmap](docs/project_roadmap.svg)
 
+## System Architecture
+
+```mermaid
+flowchart TD
+    A[Authentication] --> B[Project Workspace]
+
+    subgraph Ingestion["1. Document Ingestion"]
+        B --> C[Upload PDF / TXT / Markdown / CSV / DOCX]
+        C --> D[Extract Text]
+        D --> E[Chunk Documents]
+        E --> F[Store Metadata in PostgreSQL]
+        E --> G[Store Embeddings in Vector DB]
+    end
+
+    subgraph Retrieval["2. Project-Specific Retrieval"]
+        F --> H[Multi-Source Retrieval]
+        G --> H
+        I[Model Registry] --> H
+        J[Agent Memory] --> H
+    end
+
+    subgraph Analysis["3. Safety and Requirements Analysis"]
+        H --> K[Ask / RAG Answer]
+        H --> L[Requirement Extraction]
+        L --> M[Requirement Quality Scoring]
+        M --> N[Missing Gaps and Human Review Items]
+    end
+
+    subgraph Traceability["4. Engineering Outputs"]
+        M --> O[Traceability Matrix]
+        O --> P[Test Case Generation]
+        O --> Q[Knowledge Graph]
+        P --> R[Reports and Exports]
+        Q --> R
+    end
+
+    subgraph Operations["5. Agent Operations"]
+        K --> S[Evaluation Runs]
+        L --> S
+        M --> S
+        P --> S
+        S --> T[Agent Run Logs]
+        T --> U[Cost / Tokens / Latency]
+        T --> V[Failure Reasons]
+        T --> W[Approval Gates]
+        T --> X[Human Escalation]
+        Y[Observability Metrics] --> T
+    end
+```
+
 ## What This Project Shows
 
 - FastAPI backend engineering
@@ -193,6 +243,16 @@ transcripts are used only as educational context, not official standard text.
 ## Main Endpoints
 
 ```text
+POST /auth/login
+POST /auth/refresh
+GET  /users/me
+GET  /agent-memory
+POST /agent-memory
+GET  /models
+POST /models/select
+GET  /agent-versions
+GET  /metrics
+GET  /health
 GET  /domain-profiles
 POST /projects
 GET  /projects

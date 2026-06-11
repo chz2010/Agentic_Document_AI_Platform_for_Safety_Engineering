@@ -45,6 +45,80 @@ class DomainProfile(BaseModel):
     requirement_prefix: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = 3600
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    display_name: str | None = None
+    role: str
+    created_at: datetime
+
+
+class AgentMemoryCreate(BaseModel):
+    key: str
+    value: str
+    project_id: int | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class AgentMemoryRead(AgentMemoryCreate):
+    id: int
+    created_by: str | None = None
+    created_at: datetime
+
+
+class ModelInfo(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: str
+    provider: str
+    answer_mode: str
+    model_name: str
+    description: str
+    available: bool = True
+    selected: bool = False
+
+
+class ModelSelectRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    answer_mode: str = Field(description="openai, local, or none")
+    model_name: str
+
+
+class ModelSelectionRead(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    answer_mode: str
+    model_name: str
+    selected_by: str | None = None
+    updated_at: datetime
+
+
+class AgentVersionRead(BaseModel):
+    agent_name: str
+    version: str
+    prompt_version: str
+    tool_config_version: str
+    description: str
+    default_model: str
+
+
 class DocumentRead(BaseModel):
     id: int
     project_id: int

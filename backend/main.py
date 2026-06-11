@@ -6,11 +6,13 @@ import time
 import re
 import shutil
 import json
-from datetime import datetime
+import hashlib
+import secrets
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from langchain_core.documents import Document as LangchainDocument
@@ -23,15 +25,18 @@ from backend.database import get_session, init_db
 from backend.domain_profiles import infer_domain_profile, list_domain_profiles
 from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
-from backend.models import AgentRunLogRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, Project, ProjectDocument, RequirementRecord, TestCaseRecord, WorkflowItemRecord
+from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
 from backend.retrieval_tools import SUPPORTED_RETRIEVAL_TOOLS, run_retrieval_tool
 from backend.schemas import (
     AgentApprovalUpdate,
+    AgentMemoryCreate,
+    AgentMemoryRead,
     AgentOperationsDashboard,
     AgentRunLogCreate,
     AgentRunLogRead,
+    AgentVersionRead,
     BenchmarkEvaluationResponse,
     BenchmarkMetric,
     DocumentChunkRead,
@@ -42,12 +47,17 @@ from backend.schemas import (
     IntegrationEventRead,
     KnowledgeGraphLayout,
     KnowledgeGraphResponse,
+    LoginRequest,
+    ModelInfo,
+    ModelSelectRequest,
+    ModelSelectionRead,
     ProjectCreate,
     ProjectRead,
     PrecisionReviewRequest,
     PrecisionReviewResponse,
     QueryRequest,
     QueryResponse,
+    RefreshRequest,
     RetrievalSearchRequest,
     RetrievalSearchResponse,
     Requirement,
@@ -59,6 +69,8 @@ from backend.schemas import (
     TraceabilityLink,
     ToolOrchestrationRequest,
     ToolOrchestrationResponse,
+    TokenResponse,
+    UserRead,
     WorkflowDashboard,
     WorkflowItemCreate,
     WorkflowItemRead,
@@ -83,6 +95,110 @@ app.add_middleware(
 )
 
 
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(f"safety-platform::{password}".encode("utf-8")).hexdigest()
+
+
+def _ensure_demo_user(session: Session) -> UserRecord:
+    user = session.exec(select(UserRecord).where(UserRecord.username == settings.demo_username)).first()
+    if user:
+        return user
+    user = UserRecord(
+        username=settings.demo_username,
+        display_name="Demo Safety Engineer",
+        role="safety_engineer",
+        password_hash=_hash_password(settings.demo_password),
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def _create_auth_session(user: UserRecord, session: Session) -> TokenResponse:
+    record = AuthSessionRecord(
+        user_id=user.id,
+        access_token=secrets.token_urlsafe(32),
+        refresh_token=secrets.token_urlsafe(32),
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    session.add(record)
+    session.commit()
+    return TokenResponse(access_token=record.access_token, refresh_token=record.refresh_token)
+
+
+def _current_user(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+) -> UserRecord:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    record = session.exec(select(AuthSessionRecord).where(AuthSessionRecord.access_token == token)).first()
+    if not record or record.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = session.get(UserRecord, record.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def _model_registry() -> list[dict[str, str | bool]]:
+    return [
+        {
+            "id": "deterministic-evidence-synthesis",
+            "provider": "local",
+            "answer_mode": "none",
+            "model_name": "deterministic-evidence-synthesis",
+            "description": "No-LLM evidence synthesis for offline deterministic demos.",
+            "available": True,
+        },
+        {
+            "id": "openai-gpt-4o-mini",
+            "provider": "openai",
+            "answer_mode": "openai",
+            "model_name": "gpt-4o-mini",
+            "description": "OpenAI model for cloud answer synthesis.",
+            "available": bool(settings.openai_api_key),
+        },
+        {
+            "id": "openai-gpt-4o",
+            "provider": "openai",
+            "answer_mode": "openai",
+            "model_name": "gpt-4o",
+            "description": "Higher capability OpenAI model for deeper review.",
+            "available": bool(settings.openai_api_key),
+        },
+        {
+            "id": "local-qwen2.5-7b",
+            "provider": "ollama",
+            "answer_mode": "local",
+            "model_name": "qwen2.5:7b-instruct",
+            "description": "Local Ollama-compatible model for private/offline testing.",
+            "available": True,
+        },
+        {
+            "id": "local-mistral-7b",
+            "provider": "ollama",
+            "answer_mode": "local",
+            "model_name": "mistral:7b",
+            "description": "Local Ollama-compatible Mistral model option.",
+            "available": True,
+        },
+    ]
+
+
+def _current_model_selection(session: Session) -> ModelSelectionRecord:
+    record = session.exec(select(ModelSelectionRecord).order_by(ModelSelectionRecord.updated_at.desc())).first()
+    if record:
+        return record
+    record = ModelSelectionRecord(answer_mode=_configured_answer_mode(), model_name=_configured_answer_model())
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -91,14 +207,183 @@ def on_startup() -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, str | bool]:
+def health() -> dict[str, str | bool | int]:
     return {
         "status": "ok",
         "answer_mode": _configured_answer_mode(),
         "answer_model": _configured_answer_model(),
         "openai_configured": bool(settings.openai_api_key),
         "embedding_mode": "openai" if settings.openai_api_key else "local_hash",
+        "auth_enabled": True,
+        "model_registry_enabled": True,
     }
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics(session: Session = Depends(get_session)) -> str:
+    project_count = len(session.exec(select(Project)).all())
+    document_count = len(session.exec(select(ProjectDocument)).all())
+    requirement_count = len(session.exec(select(RequirementRecord)).all())
+    agent_runs = session.exec(select(AgentRunLogRecord)).all()
+    failed_runs = sum(1 for run in agent_runs if run.status in {"failed", "blocked"})
+    total_cost = sum(run.estimated_cost_usd for run in agent_runs)
+    total_output_tokens = sum(int((run.token_usage or {}).get("completion_tokens") or (run.token_usage or {}).get("output_tokens") or 0) for run in agent_runs)
+    lines = [
+        "# HELP safety_platform_projects_total Total projects.",
+        "# TYPE safety_platform_projects_total gauge",
+        f"safety_platform_projects_total {project_count}",
+        "# HELP safety_platform_documents_total Total uploaded documents.",
+        "# TYPE safety_platform_documents_total gauge",
+        f"safety_platform_documents_total {document_count}",
+        "# HELP safety_platform_requirements_total Total stored requirements.",
+        "# TYPE safety_platform_requirements_total gauge",
+        f"safety_platform_requirements_total {requirement_count}",
+        "# HELP safety_platform_agent_runs_total Total agent runs.",
+        "# TYPE safety_platform_agent_runs_total gauge",
+        f"safety_platform_agent_runs_total {len(agent_runs)}",
+        "# HELP safety_platform_agent_run_failures_total Failed or blocked agent runs.",
+        "# TYPE safety_platform_agent_run_failures_total gauge",
+        f"safety_platform_agent_run_failures_total {failed_runs}",
+        "# HELP safety_platform_estimated_cost_usd_total Estimated agent run cost.",
+        "# TYPE safety_platform_estimated_cost_usd_total gauge",
+        f"safety_platform_estimated_cost_usd_total {total_cost:.6f}",
+        "# HELP safety_platform_output_tokens_total Estimated output tokens.",
+        "# TYPE safety_platform_output_tokens_total gauge",
+        f"safety_platform_output_tokens_total {total_output_tokens}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(payload: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
+    user = _ensure_demo_user(session)
+    if payload.username != user.username or _hash_password(payload.password) != user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return _create_auth_session(user, session)
+
+
+@app.post("/auth/refresh", response_model=TokenResponse)
+def refresh_token(payload: RefreshRequest, session: Session = Depends(get_session)) -> TokenResponse:
+    record = session.exec(select(AuthSessionRecord).where(AuthSessionRecord.refresh_token == payload.refresh_token)).first()
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    user = session.get(UserRecord, record.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    session.delete(record)
+    session.commit()
+    return _create_auth_session(user, session)
+
+
+@app.get("/users/me", response_model=UserRead)
+def users_me(user: UserRecord = Depends(_current_user)) -> UserRecord:
+    return user
+
+
+@app.get("/agent-memory", response_model=list[AgentMemoryRead])
+def list_agent_memory(
+    project_id: int | None = None,
+    user: UserRecord = Depends(_current_user),
+    session: Session = Depends(get_session),
+) -> list[AgentMemoryRecord]:
+    statement = select(AgentMemoryRecord)
+    if project_id is not None:
+        statement = statement.where(AgentMemoryRecord.project_id == project_id)
+    return session.exec(statement.order_by(AgentMemoryRecord.created_at.desc())).all()
+
+
+@app.post("/agent-memory", response_model=AgentMemoryRead)
+def create_agent_memory(
+    payload: AgentMemoryCreate,
+    user: UserRecord = Depends(_current_user),
+    session: Session = Depends(get_session),
+) -> AgentMemoryRecord:
+    if payload.project_id is not None:
+        _project_or_404(payload.project_id, session)
+    record = AgentMemoryRecord(**payload.model_dump(), created_by=user.username)
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+@app.get("/models", response_model=list[ModelInfo])
+def list_models(session: Session = Depends(get_session)) -> list[ModelInfo]:
+    selection = _current_model_selection(session)
+    models = _model_registry()
+    return [
+        ModelInfo(
+            **model,
+            selected=model["answer_mode"] == selection.answer_mode and model["model_name"] == selection.model_name,
+        )
+        for model in models
+    ]
+
+
+@app.post("/models/select", response_model=ModelSelectionRead)
+def select_model(
+    payload: ModelSelectRequest,
+    user: UserRecord = Depends(_current_user),
+    session: Session = Depends(get_session),
+) -> ModelSelectionRecord:
+    valid = any(
+        model["answer_mode"] == payload.answer_mode and model["model_name"] == payload.model_name
+        for model in _model_registry()
+    )
+    if not valid:
+        raise HTTPException(status_code=400, detail="Model is not registered")
+    record = _current_model_selection(session)
+    record.answer_mode = payload.answer_mode
+    record.model_name = payload.model_name
+    record.selected_by = user.username
+    record.updated_at = datetime.utcnow()
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    settings.answer_mode = payload.answer_mode
+    if payload.answer_mode == "openai":
+        settings.llm_model = payload.model_name
+    if payload.answer_mode == "local":
+        settings.local_llm_model = payload.model_name
+    return record
+
+
+@app.get("/agent-versions", response_model=list[AgentVersionRead])
+def agent_versions() -> list[AgentVersionRead]:
+    return [
+        AgentVersionRead(
+            agent_name="project_rag_agent",
+            version="v1.2",
+            prompt_version="query-answer-v1",
+            tool_config_version="rag-tools-v1",
+            description="Retrieves project evidence and synthesizes safety or requirements answers.",
+            default_model=_configured_answer_model(),
+        ),
+        AgentVersionRead(
+            agent_name="requirements_agent",
+            version="v1.1",
+            prompt_version="requirements-extract-v2",
+            tool_config_version="requirements-tools-v1",
+            description="Extracts, scores, and normalizes structured requirements from uploaded documents.",
+            default_model="heuristic-pydantic-extractor",
+        ),
+        AgentVersionRead(
+            agent_name="precision_review_agent",
+            version="v1.1",
+            prompt_version="precision-review-v1",
+            tool_config_version="multi-retrieval-tools-v1",
+            description="Reranks evidence, checks candidate standard references, and creates human review items.",
+            default_model="deterministic-review-engine",
+        ),
+        AgentVersionRead(
+            agent_name="workflow_orchestrator",
+            version="v1.0",
+            prompt_version="orchestration-v1",
+            tool_config_version="tools-v1",
+            description="Runs mock agent tools and creates auditable workflow actions.",
+            default_model="local-orchestrator-v1",
+        ),
+    ]
 
 
 @app.get("/domain-profiles", response_model=list[DomainProfile])
@@ -131,6 +416,7 @@ def delete_project(project_id: int, session: Session = Depends(get_session)) -> 
     _delete_project_vector_entries(project_id)
     _delete_project_uploads(project_id)
     for model in [
+        AgentMemoryRecord,
         IntegrationEventRecord,
         WorkflowItemRecord,
         AgentRunLogRecord,

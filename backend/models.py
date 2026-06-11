@@ -20,6 +20,44 @@ class Project(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class UserRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    display_name: str | None = None
+    role: str = Field(default="safety_engineer", index=True)
+    password_hash: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AuthSessionRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True, foreign_key="userrecord.id")
+    access_token: str = Field(index=True, unique=True)
+    refresh_token: str = Field(index=True, unique=True)
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AgentMemoryRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int | None = Field(default=None, index=True, foreign_key="project.id")
+    key: str = Field(index=True)
+    value: str
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_by: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ModelSelectionRecord(SQLModel, table=True):
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: int | None = Field(default=None, primary_key=True)
+    answer_mode: str = "none"
+    model_name: str = "deterministic-evidence-synthesis"
+    selected_by: str | None = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ProjectDocument(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     project_id: int = Field(index=True, foreign_key="project.id")
