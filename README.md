@@ -19,7 +19,24 @@ Compose.
 
 ## Project Roadmap
 
-![Project roadmap](docs/project_roadmap.svg)
+```mermaid
+flowchart LR
+    A["Completed<br/>FastAPI backend<br/>Project workspaces<br/>Document upload and chunking<br/>Project-specific RAG<br/>Requirements extraction and scoring<br/>Traceability and knowledge graph<br/>AgentOps, auth, memory, model registry, metrics"]
+    B["Current Focus<br/>Validate LiDAR and railway examples<br/>Improve demo dataset quality<br/>Polish Streamlit analyst dashboard<br/>Prepare recruiter demo workflow"]
+    C["Next Steps<br/>Clause-aware reference mapping<br/>Better benchmark metrics<br/>Persistent review workflows<br/>Report export polish"]
+    D["Longer-Term<br/>Multi-user roles<br/>Background ingestion jobs<br/>Deployment hardening<br/>Project 3: multi-agent ISO 26262 co-pilot"]
+
+    A --> B --> C --> D
+
+    classDef done fill:#ecfdf5,stroke:#10b981,color:#0f172a;
+    classDef current fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
+    classDef next fill:#fff7ed,stroke:#f97316,color:#0f172a;
+    classDef later fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
+    class A done;
+    class B current;
+    class C next;
+    class D later;
+```
 
 ## System Architecture
 
