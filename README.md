@@ -16,30 +16,44 @@ Engineering platform with FastAPI, project workspaces, PDF upload,
 project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
+
 ```mermaid
-flowchart TD
+flowchart LR
+    A[Project Workspace] --> B[Document Upload]
+    B --> C[Text Extraction and Chunking]
+    C --> D[Vector Store]
+    C --> E[PostgreSQL Metadata]
 
-A[Project Documents]
-B[Ingestion & Embeddings]
-C[Vector Store]
-D[Knowledge Graph]
-E[RAG & Agentic AI]
-F[Requirements & Safety Analysis]
-G[AgentOps & Evaluation]
-H[Workflow & Integrations]
-I[Reports]
+    D --> F[Project-Specific RAG]
+    E --> F
 
-A --> B
-B --> C
-B --> D
-C <--> D
-C --> E
-D --> E
-E --> F
-F --> G
-G --> H
-H --> I
-```       
+    F --> G[Safety and Requirements Analysis]
+    G --> H[Requirement Extraction]
+    H --> I[Quality Scoring]
+    I --> J[Traceability Matrix]
+    J --> K[Test Case Generation]
+    J --> L[Knowledge Graph]
+
+    G --> M[Evaluation Runs]
+    H --> M
+    I --> M
+    K --> M
+
+    M --> N[Agent Operations]
+    N --> O[Cost, Tokens, Latency]
+    N --> P[Failure Reasons and Escalation]
+    N --> Q[Approval Gates]
+
+    L --> R[Reports and Exports]
+    J --> R
+    K --> R
+
+    S[Model Registry] --> F
+    T[Agent Memory] --> G
+    U[Authentication] --> A
+    V[Observability Metrics] --> N
+```
+
 ## Project Roadmap
 
 ![Project roadmap](docs/project_roadmap.svg)
