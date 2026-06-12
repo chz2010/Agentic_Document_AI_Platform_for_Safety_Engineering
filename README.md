@@ -262,6 +262,62 @@ flowchart TD
     P --> Q[Evaluation History and AgentOps Log]
 ```
 
+## MCP Integration Concept
+
+Project 2 is designed to consume external safety knowledge services. Project 1
+already exposes a read-only MCP server for standards, document, and video
+evidence retrieval. Project 2 does not currently run its own MCP server; the
+intended integration is for Project 2 or a future Project 3 co-pilot to call
+Project 1 as an MCP-based knowledge service.
+
+```mermaid
+flowchart LR
+    subgraph P1["Project 1: Autonomous Driving Safety Analyst"]
+        SDB[(Standards / Document DB)]
+        VDB[(Video Transcript DB)]
+        MCP[MCP Knowledge Service]
+        SDB --> MCP
+        VDB --> MCP
+    end
+
+    subgraph P2["Project 2: Agentic Document AI Platform"]
+        DOCS[Uploaded Project Documents]
+        RAG[Project-Specific RAG]
+        REQ[Requirements Engineering]
+        TRACE[Traceability + Knowledge Graph]
+        OPS[AgentOps + Evaluation]
+        DOCS --> RAG
+        RAG --> REQ
+        REQ --> TRACE
+        TRACE --> OPS
+    end
+
+    subgraph P3["Project 3: Future Safety Co-Pilot"]
+        AGENT[Multi-Agent Functional Safety Assistant]
+    end
+
+    MCP -->|standards and evidence context| RAG
+    MCP -->|clause / video evidence| REQ
+    P2 -->|workflow and traceability tools| AGENT
+    MCP -->|domain knowledge tools| AGENT
+```
+
+Planned MCP tool usage:
+
+```text
+Project 1 MCP:
+  search_safety_standards
+  search_video_evidence
+  search_combined_safety_context
+
+Project 2 REST APIs:
+  requirements extraction
+  requirement evaluation
+  traceability generation
+  workflow item creation
+  AgentOps monitoring
+```
+
 ## What This Project Shows
 
 - FastAPI backend engineering
@@ -283,6 +339,8 @@ flowchart TD
 - Tool orchestration layer for `search_project_docs`, `extract_requirements`,
   `evaluate_requirements`, `generate_traceability`, `generate_test_cases`, and
   `create_issue_ticket`
+- MCP integration concept for consuming Project 1 as an external standards and
+  video-evidence knowledge service
 - Multi-source retrieval across project documents, requirements, traceability,
   test cases, evaluation history, and agent run logs
 - Precision review module with reranked evidence, confidence scoring, candidate
