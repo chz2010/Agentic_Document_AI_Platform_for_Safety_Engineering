@@ -10,6 +10,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -25,7 +26,7 @@ from backend.database import get_session, init_db
 from backend.domain_profiles import infer_domain_profile, list_domain_profiles
 from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
-from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
+from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectConversationMessageRecord, ProjectConversationRecord, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
 from backend.retrieval_tools import SUPPORTED_RETRIEVAL_TOOLS, run_retrieval_tool
@@ -39,6 +40,9 @@ from backend.schemas import (
     AgentVersionRead,
     BenchmarkEvaluationResponse,
     BenchmarkMetric,
+    ConversationActionRequest,
+    ConversationActionResponse,
+    ConversationIntentResponse,
     DocumentChunkRead,
     DocumentRead,
     DomainProfile,
@@ -52,6 +56,10 @@ from backend.schemas import (
     ModelSelectRequest,
     ModelSelectionRead,
     ProjectCreate,
+    ProjectConversationCreate,
+    ProjectConversationMessageCreate,
+    ProjectConversationMessageRead,
+    ProjectConversationRead,
     ProjectRead,
     PrecisionReviewRequest,
     PrecisionReviewResponse,
@@ -418,6 +426,8 @@ def delete_project(project_id: int, session: Session = Depends(get_session)) -> 
     for model in [
         AgentMemoryRecord,
         IntegrationEventRecord,
+        ProjectConversationMessageRecord,
+        ProjectConversationRecord,
         WorkflowItemRecord,
         AgentRunLogRecord,
         EvaluationRunRecord,
@@ -837,6 +847,137 @@ def list_evaluation_runs(project_id: int, session: Session = Depends(get_session
     return session.exec(select(EvaluationRunRecord).where(EvaluationRunRecord.project_id == project_id).order_by(EvaluationRunRecord.created_at.desc())).all()
 
 
+@app.post("/projects/{project_id}/conversations", response_model=ProjectConversationRead)
+def create_project_conversation(
+    project_id: int,
+    payload: ProjectConversationCreate,
+    session: Session = Depends(get_session),
+) -> ProjectConversationRead:
+    _project_or_404(project_id, session)
+    record = ProjectConversationRecord(
+        project_id=project_id,
+        title=payload.title or f"{payload.mode.replace('_', ' ').title()} conversation",
+        mode=payload.mode,
+        source_system=payload.source_system,
+        conversation_metadata=payload.metadata,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _conversation_read(record, session)
+
+
+@app.post("/projects/{project_id}/conversations/{conversation_id}/messages", response_model=ProjectConversationMessageRead)
+def add_project_conversation_message(
+    project_id: int,
+    conversation_id: int,
+    payload: ProjectConversationMessageCreate,
+    session: Session = Depends(get_session),
+) -> ProjectConversationMessageRead:
+    conversation = _conversation_or_404(project_id, conversation_id, session)
+    detected = _detect_conversation_intent(payload.content)
+    record = ProjectConversationMessageRecord(
+        project_id=project_id,
+        conversation_id=conversation_id,
+        role=payload.role,
+        content=payload.content,
+        intent=detected["intent"] if payload.role == "user" else None,
+        retrieved_refs=payload.retrieved_refs,
+        message_metadata=payload.metadata,
+    )
+    conversation.updated_at = datetime.utcnow()
+    session.add(conversation)
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _conversation_message_read(record)
+
+
+@app.post("/projects/{project_id}/conversations/{conversation_id}/intent-detect", response_model=ConversationIntentResponse)
+def detect_project_conversation_intent(
+    project_id: int,
+    conversation_id: int,
+    session: Session = Depends(get_session),
+) -> ConversationIntentResponse:
+    _conversation_or_404(project_id, conversation_id, session)
+    message = _latest_user_message(project_id, conversation_id, session)
+    if not message:
+        raise HTTPException(status_code=400, detail="Conversation has no user message to classify")
+    detected = _detect_conversation_intent(message.content)
+    message.intent = detected["intent"]
+    session.add(message)
+    session.commit()
+    return ConversationIntentResponse(conversation_id=conversation_id, **detected)
+
+
+@app.post("/projects/{project_id}/conversations/{conversation_id}/actions", response_model=ConversationActionResponse)
+def create_actions_from_conversation(
+    project_id: int,
+    conversation_id: int,
+    payload: ConversationActionRequest | None = None,
+    session: Session = Depends(get_session),
+) -> ConversationActionResponse:
+    _conversation_or_404(project_id, conversation_id, session)
+    payload = payload or ConversationActionRequest()
+    message = _latest_user_message(project_id, conversation_id, session)
+    if not message:
+        raise HTTPException(status_code=400, detail="Conversation has no user message to convert into actions")
+
+    detected = _detect_conversation_intent(message.content)
+    message.intent = detected["intent"]
+
+    agent_run_id: int | None = None
+    if payload.create_agent_run:
+        record = create_agent_run_log(
+            project_id,
+            AgentRunLogCreate(
+                operation_name="conversation_to_action",
+                agent_name="conversation_action_orchestrator",
+                status="requires_human_review",
+                model_used="deterministic-intent-router",
+                model_version="conversation-router-v1",
+                prompt_version="conversation-action-v1",
+                tool_config_version="conversation-tools-v1",
+                user_request=message.content,
+                input_summary=message.content,
+                output_summary=f"Detected {detected['intent']} and proposed {len(detected['recommended_actions'])} actions.",
+                tools_used=detected["suggested_tools"],
+                confidence_score=detected["confidence"],
+                hallucination_risk="low" if detected["confidence"] >= 0.75 else "medium",
+                evaluation_score=detected["confidence"],
+                human_escalation_required=detected["confidence"] < 0.75,
+                escalation_reason="Conversation intent confidence below approval threshold." if detected["confidence"] < 0.75 else None,
+                metadata={
+                    "source_system": "agentic_document_ai_platform",
+                    "conversation_id": conversation_id,
+                    "intent": detected["intent"],
+                    "rationale": detected["rationale"],
+                },
+            ),
+            session,
+        )
+        agent_run_id = record.id
+
+    workflow_items: list[WorkflowItemRead] = []
+    if payload.create_workflow_items:
+        for action in _workflow_items_for_intent(project_id, detected, message.content, payload, agent_run_id):
+            session.add(action)
+            session.commit()
+            session.refresh(action)
+            workflow_items.append(_workflow_item_read(action))
+        message.action_ids = [item.id for item in workflow_items]
+
+    session.add(message)
+    session.commit()
+    return ConversationActionResponse(
+        conversation_id=conversation_id,
+        intent=detected["intent"],
+        agent_run_id=agent_run_id,
+        workflow_items=workflow_items,
+        proposed_actions=detected["recommended_actions"],
+    )
+
+
 @app.post("/projects/{project_id}/agent-runs", response_model=AgentRunLogRead)
 def create_agent_run(project_id: int, payload: AgentRunLogCreate, session: Session = Depends(get_session)) -> AgentRunLogRead:
     _project_or_404(project_id, session)
@@ -1118,6 +1259,177 @@ def export_report(project_id: int, format: str = Query(default="markdown", patte
     if format == "json":
         return {"requirements": requirements, "traceability": traceability}
     return PlainTextResponse(markdown_report(project.name, requirements, traceability), media_type="text/markdown")
+
+
+def _conversation_or_404(project_id: int, conversation_id: int, session: Session) -> ProjectConversationRecord:
+    _project_or_404(project_id, session)
+    record = session.get(ProjectConversationRecord, conversation_id)
+    if not record or record.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return record
+
+
+def _conversation_read(record: ProjectConversationRecord, session: Session) -> ProjectConversationRead:
+    message_count = len(
+        session.exec(
+            select(ProjectConversationMessageRecord).where(
+                ProjectConversationMessageRecord.conversation_id == record.id
+            )
+        ).all()
+    )
+    return ProjectConversationRead(
+        id=record.id,
+        project_id=record.project_id,
+        title=record.title,
+        mode=record.mode,
+        source_system=record.source_system,
+        status=record.status,
+        metadata=record.conversation_metadata,
+        message_count=message_count,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _conversation_message_read(record: ProjectConversationMessageRecord) -> ProjectConversationMessageRead:
+    return ProjectConversationMessageRead(
+        id=record.id,
+        project_id=record.project_id,
+        conversation_id=record.conversation_id,
+        role=record.role,
+        content=record.content,
+        intent=record.intent,
+        retrieved_refs=record.retrieved_refs,
+        action_ids=record.action_ids,
+        metadata=record.message_metadata,
+        created_at=record.created_at,
+    )
+
+
+def _latest_user_message(project_id: int, conversation_id: int, session: Session) -> ProjectConversationMessageRecord | None:
+    return session.exec(
+        select(ProjectConversationMessageRecord)
+        .where(
+            ProjectConversationMessageRecord.project_id == project_id,
+            ProjectConversationMessageRecord.conversation_id == conversation_id,
+            ProjectConversationMessageRecord.role == "user",
+        )
+        .order_by(ProjectConversationMessageRecord.created_at.desc())
+    ).first()
+
+
+def _detect_conversation_intent(text: str) -> dict[str, Any]:
+    lower = text.lower()
+    if any(term in lower for term in ["traceability", "trace", "matrix", "linked", "link"]):
+        return {
+            "intent": "traceability_action",
+            "confidence": 0.88,
+            "rationale": "The request asks about links, traceability, or matrix coverage.",
+            "suggested_tools": ["search_project_docs", "generate_traceability", "generate_test_cases"],
+            "recommended_actions": [
+                "Review Hazard -> Safety Goal -> Requirement -> Test Case links.",
+                "Create workflow item for missing traceability rows.",
+            ],
+        }
+    if any(term in lower for term in ["requirement", "requirements", "shall", "quality", "ambiguous", "threshold", "odd"]):
+        return {
+            "intent": "requirements_action",
+            "confidence": 0.9,
+            "rationale": "The request focuses on extracting, improving, or checking requirements.",
+            "suggested_tools": ["extract_requirements", "evaluate_requirements", "search_project_docs"],
+            "recommended_actions": [
+                "Extract or review candidate requirements.",
+                "Create workflow item for missing measurable thresholds, ODD boundaries, or verification method.",
+            ],
+        }
+    if any(term in lower for term in ["test case", "test cases", "verification", "validate", "validation", "evidence"]):
+        return {
+            "intent": "verification_action",
+            "confidence": 0.86,
+            "rationale": "The request focuses on verification, validation, evidence, or test cases.",
+            "suggested_tools": ["search_project_docs", "generate_test_cases", "evaluate_requirements"],
+            "recommended_actions": [
+                "Generate or review linked test cases.",
+                "Create workflow item for missing pass/fail criteria or required evidence.",
+            ],
+        }
+    if any(term in lower for term in ["hazard", "hara", "safety goal", "asil", "risk"]):
+        return {
+            "intent": "safety_analysis_action",
+            "confidence": 0.84,
+            "rationale": "The request asks about hazards, HARA, safety goals, ASIL, or risk.",
+            "suggested_tools": ["search_project_docs", "extract_requirements", "generate_traceability"],
+            "recommended_actions": [
+                "Review hazard and safety-goal coverage.",
+                "Create workflow item for unresolved safety analysis gaps.",
+            ],
+        }
+    if any(term in lower for term in ["issue", "ticket", "jira", "github", "slack", "notify", "action item"]):
+        return {
+            "intent": "external_workflow_action",
+            "confidence": 0.87,
+            "rationale": "The request asks to create or route an engineering workflow action.",
+            "suggested_tools": ["create_issue_ticket"],
+            "recommended_actions": [
+                "Create a workflow item or mock external ticket.",
+                "Assign owner, priority, and acceptance criteria.",
+            ],
+        }
+    return {
+        "intent": "project_question",
+        "confidence": 0.68,
+        "rationale": "The request is a general project question and should be reviewed before action creation.",
+        "suggested_tools": ["search_project_docs"],
+        "recommended_actions": [
+            "Search project documents for evidence.",
+            "Escalate to human review if the question implies an engineering decision.",
+        ],
+    }
+
+
+def _workflow_items_for_intent(
+    project_id: int,
+    detected: dict[str, Any],
+    user_request: str,
+    payload: ConversationActionRequest,
+    agent_run_id: int | None,
+) -> list[WorkflowItemRecord]:
+    intent = detected["intent"]
+    stage_by_intent = {
+        "requirements_action": "requirements_engineering",
+        "traceability_action": "traceability",
+        "verification_action": "verification",
+        "safety_analysis_action": "safety_analysis",
+        "external_workflow_action": "workflow_management",
+        "project_question": "intake",
+    }
+    title_by_intent = {
+        "requirements_action": "Review requirements from conversation",
+        "traceability_action": "Review traceability links from conversation",
+        "verification_action": "Review verification and test evidence",
+        "safety_analysis_action": "Review safety analysis gap",
+        "external_workflow_action": "Create engineering workflow action",
+        "project_question": "Review project question",
+    }
+    priority = payload.priority or ("high" if detected["confidence"] >= 0.85 else "medium")
+    return [
+        WorkflowItemRecord(
+            project_id=project_id,
+            title=title_by_intent.get(intent, "Review conversation action"),
+            description=(
+                f"Conversation intent: {intent}. User request: {user_request} "
+                f"Rationale: {detected['rationale']}"
+            ),
+            source_system="conversation_to_action",
+            workflow_stage=stage_by_intent.get(intent, "intake"),
+            status="open",
+            priority=priority,
+            owner=payload.owner,
+            linked_agent_run_id=agent_run_id,
+            acceptance_criteria=detected["recommended_actions"],
+            notes="Created from conversation-to-action workflow.",
+        )
+    ]
 
 
 def _project_or_404(project_id: int, session: Session) -> Project:

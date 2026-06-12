@@ -529,6 +529,56 @@ def test_autonomous_safety_analyst_workflow_tracking():
         assert after_delete.json() == []
 
 
+def test_project_conversation_to_action_workflow():
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "Conversation Action Project", "domain": "ADAS", "system_type": "AEB"},
+        ).json()
+
+        conversation = client.post(
+            f"/projects/{project['id']}/conversations",
+            json={"title": "Requirement follow-up", "mode": "requirements_review"},
+        )
+        assert conversation.status_code == 200
+        conversation_body = conversation.json()
+        assert conversation_body["message_count"] == 0
+
+        message = client.post(
+            f"/projects/{project['id']}/conversations/{conversation_body['id']}/messages",
+            json={
+                "role": "user",
+                "content": "Please review these requirements for missing thresholds, ODD conditions, and verification methods.",
+            },
+        )
+        assert message.status_code == 200
+        assert message.json()["intent"] == "requirements_action"
+
+        intent = client.post(f"/projects/{project['id']}/conversations/{conversation_body['id']}/intent-detect")
+        assert intent.status_code == 200
+        intent_body = intent.json()
+        assert intent_body["intent"] == "requirements_action"
+        assert "evaluate_requirements" in intent_body["suggested_tools"]
+
+        actions = client.post(
+            f"/projects/{project['id']}/conversations/{conversation_body['id']}/actions",
+            json={"owner": "safety_engineer", "priority": "high"},
+        )
+        assert actions.status_code == 200
+        action_body = actions.json()
+        assert action_body["intent"] == "requirements_action"
+        assert action_body["agent_run_id"]
+        assert action_body["workflow_items"]
+        assert action_body["workflow_items"][0]["source_system"] == "conversation_to_action"
+        assert action_body["workflow_items"][0]["workflow_stage"] == "requirements_engineering"
+
+        workflow_items = client.get(
+            f"/projects/{project['id']}/workflow/items?source_system=conversation_to_action"
+        )
+        assert workflow_items.status_code == 200
+        assert len(workflow_items.json()) == 1
+
+
 def test_multi_retrieval_search_across_project_sources():
     content = (
         "REQ-AEB-201: The AEB system shall detect occluded pedestrians at night "

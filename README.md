@@ -158,6 +158,8 @@ flowchart TD
     F --> G[Traceability and Test Case APIs]
     G --> H[Report APIs]
     E --> I[Agent Tool APIs]
+    E --> L[Conversation-To-Action APIs]
+    L --> J
     I --> J[AgentOps Dashboard APIs]
     J --> K[Metrics and Health APIs]
 
@@ -167,6 +169,7 @@ flowchart TD
     E --> E1["POST /query<br/>POST /retrieval/search<br/>POST /analysis/precision-review"]
     F --> F1["POST /requirements/extract<br/>POST /requirements/generate<br/>POST /requirements/evaluate"]
     G --> G1["GET /traceability<br/>POST /test-cases/generate<br/>GET /knowledge-graph"]
+    L --> L1["POST /conversations<br/>POST /messages<br/>POST /intent-detect<br/>POST /actions"]
     J --> J1["POST /agent-runs<br/>GET /agent-runs<br/>PATCH /approval"]
     K --> K1["GET /health<br/>GET /metrics<br/>GET /models"]
 ```
@@ -287,6 +290,9 @@ flowchart TD
 - Per-run answer engine selection: OpenAI, local Ollama-compatible model, or
   deterministic evidence synthesis with no LLM
 - Workflow tracking board for safety-review follow-up actions
+- Conversation-to-action workflow that detects user intent from project
+  conversations and converts review discussions into workflow items and
+  auditable agent runs
 - Mock integrations for GitHub issues, Jira-style tickets, CRM-like updates,
   and Slack-style notifications
 - Evaluation dashboard metrics for success rate, escalation rate, latency,
@@ -422,6 +428,10 @@ GET  /projects/{project_id}/agent-runs/{agent_run_id}
 PATCH /projects/{project_id}/agent-runs/{agent_run_id}/approval
 POST /projects/{project_id}/agent-tools/run
 GET  /projects/{project_id}/agent-operations/dashboard
+POST /projects/{project_id}/conversations
+POST /projects/{project_id}/conversations/{conversation_id}/messages
+POST /projects/{project_id}/conversations/{conversation_id}/intent-detect
+POST /projects/{project_id}/conversations/{conversation_id}/actions
 POST /projects/{project_id}/integrations/github-issue
 POST /projects/{project_id}/integrations/jira-ticket
 POST /projects/{project_id}/integrations/slack-notification
@@ -460,6 +470,26 @@ Approval gates are triggered when confidence is below `0.75`, hallucination risk
 is `high` or `critical`, evaluation score is low, or a failure reason is
 recorded. Agent outputs can be tracked as `resolved`, `needs_more_info`,
 `requires_human_review`, or `blocked`.
+
+## Conversation-To-Action Workflow
+
+The platform can convert project conversations into auditable engineering
+actions. A user message is classified into an engineering intent such as
+`requirements_action`, `traceability_action`, `verification_action`,
+`safety_analysis_action`, or `external_workflow_action`.
+
+The action endpoint can then create:
+
+- an AgentOps run for auditability, confidence, prompt/version, and approval
+  tracking
+- a workflow item with owner, priority, acceptance criteria, and linked agent
+  run metadata
+
+This turns a normal project discussion into a reviewable engineering workflow:
+
+```text
+conversation -> intent detection -> proposed action -> workflow item -> human review
+```
 
 ## Run Locally
 

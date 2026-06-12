@@ -569,3 +569,59 @@ class WorkflowDashboard(BaseModel):
     by_status: dict[str, int]
     by_priority: dict[str, int]
     overdue_items: int
+
+
+class ProjectConversationCreate(BaseModel):
+    title: str | None = None
+    mode: str = "requirements_review"
+    source_system: str = "agentic_document_ai_platform"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectConversationRead(ProjectConversationCreate):
+    id: int
+    project_id: int
+    status: str
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectConversationMessageCreate(BaseModel):
+    role: str = Field(default="user", pattern="^(user|assistant|system)$")
+    content: str
+    retrieved_refs: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectConversationMessageRead(ProjectConversationMessageCreate):
+    id: int
+    project_id: int
+    conversation_id: int
+    intent: str | None = None
+    action_ids: list[int] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ConversationIntentResponse(BaseModel):
+    conversation_id: int
+    intent: str
+    confidence: float
+    rationale: str
+    suggested_tools: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
+class ConversationActionRequest(BaseModel):
+    create_workflow_items: bool = True
+    create_agent_run: bool = True
+    owner: str | None = None
+    priority: str | None = None
+
+
+class ConversationActionResponse(BaseModel):
+    conversation_id: int
+    intent: str
+    agent_run_id: int | None = None
+    workflow_items: list[WorkflowItemRead] = Field(default_factory=list)
+    proposed_actions: list[str] = Field(default_factory=list)

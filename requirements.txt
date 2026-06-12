@@ -1,5 +1,6 @@
 # Backend API
 fastapi==0.115.0
+starlette==0.38.6
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 

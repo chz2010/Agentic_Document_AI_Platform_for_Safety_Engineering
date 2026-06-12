@@ -195,3 +195,28 @@ class WorkflowItemRecord(SQLModel, table=True):
     notes: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProjectConversationRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int = Field(index=True, foreign_key="project.id")
+    title: str
+    mode: str = Field(default="requirements_review", index=True)
+    source_system: str = Field(default="agentic_document_ai_platform", index=True)
+    status: str = Field(default="active", index=True)
+    conversation_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProjectConversationMessageRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    project_id: int = Field(index=True, foreign_key="project.id")
+    conversation_id: int = Field(index=True, foreign_key="projectconversationrecord.id")
+    role: str = Field(default="user", index=True)
+    content: str
+    intent: str | None = Field(default=None, index=True)
+    retrieved_refs: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    action_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    message_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
