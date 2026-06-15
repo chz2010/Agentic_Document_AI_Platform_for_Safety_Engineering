@@ -175,10 +175,10 @@ flowchart TD
     Q3 --> REVIEW
     Q4 --> SAFETYCASE[Safety Case Evidence Review]
 
-    classDef graph fill:#ecfdf5,stroke:#10b981,color:#0f172a;
+    classDef graphNode fill:#ecfdf5,stroke:#10b981,color:#0f172a;
     classDef query fill:#fff7ed,stroke:#f97316,color:#0f172a;
     classDef db fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
-    class KG,NODES,EDGES,SYNC graph;
+    class KG,NODES,EDGES,SYNC graphNode;
     class Q1,Q2,Q3,Q4 query;
     class NEO db;
 ```
