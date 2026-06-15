@@ -8,7 +8,8 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from backend.models import AgentRunLogRecord, IntegrationEventRecord, RequirementRecord, TestCaseRecord
+from backend.mlflow_tracking import log_agent_run
+from backend.models import AgentRunLogRecord, IntegrationEventRecord, Project, RequirementRecord, TestCaseRecord
 from backend.retrieval_tools import search_project_docs
 from backend.schemas import AgentApprovalUpdate, AgentOperationsDashboard, AgentRunLogCreate, IntegrationEventCreate
 
@@ -97,6 +98,7 @@ def create_agent_run_log(project_id: int, payload: AgentRunLogCreate, session: S
     session.add(record)
     session.commit()
     session.refresh(record)
+    log_agent_run(record, session.get(Project, project_id))
     return record
 
 

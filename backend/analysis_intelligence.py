@@ -181,7 +181,26 @@ def check_requirement_completeness(records: list[RequirementRecord], standards: 
         lower = record.text.lower()
         if not re.search(r"\b\d+(\.\d+)?\s?(ms|s|m|km/h|%|deg|lux|hz|seconds|meters)\b", lower):
             missing.append("measurable threshold")
-        if not any(term in lower for term in ["odd", "night", "rain", "fog", "occlusion", "speed", "lighting", "road"]):
+        if not any(
+            term in lower
+            for term in [
+                "odd",
+                "operational design domain",
+                "operating condition",
+                "operational condition",
+                "operating mode",
+                "mode",
+                "scenario",
+                "environment",
+                "night",
+                "rain",
+                "fog",
+                "occlusion",
+                "speed",
+                "lighting",
+                "road",
+            ]
+        ):
             missing.append("ODD condition")
         if not any(term in lower for term in ["test", "verify", "validate", "measure", "evidence", "pass"]):
             missing.append("verification method")

@@ -18,6 +18,7 @@ import streamlit.components.v1 as components
 
 DEFAULT_API_URL = os.getenv("SAFETY_BACKEND_API_URL", "http://127.0.0.1:8000")
 SEED_DOCUMENT = Path(__file__).parent / "datasets" / "seed_requirements" / "automotive_safety_requirements.md"
+SEED_DEMO_PROJECT_NAME = "Seed Demo - AEB and Perception Safety Requirements"
 
 
 st.set_page_config(
@@ -989,11 +990,18 @@ def render_page_header(page: str) -> None:
 
 
 def create_seed_demo_project() -> dict[str, Any]:
+    existing_seed_project = next(
+        (project for project in load_projects() if project.get("name") == SEED_DEMO_PROJECT_NAME),
+        None,
+    )
+    if existing_seed_project:
+        return existing_seed_project
+
     project = api_request(
         "POST",
         "/projects",
         json={
-            "name": "Seed Demo - AEB and Perception Safety Requirements",
+            "name": SEED_DEMO_PROJECT_NAME,
             "domain": "Autonomous driving",
             "system_type": "ADAS safety engineering",
             "standards_scope": ["ISO 26262", "ISO 21448", "ISO 8800"],
@@ -1063,7 +1071,7 @@ def render_project_sidebar() -> dict[str, Any] | None:
     project = selected_project(projects)
     if project:
         action_cols = st.sidebar.columns([0.82, 0.18])
-        if action_cols[0].button("+  New", use_container_width=True):
+        if action_cols[0].button("Load seed demo", use_container_width=True):
             create_seed_demo_project()
             st.rerun()
         if action_cols[1].button("⌫", use_container_width=True, help="Open delete confirmation"):
@@ -1195,6 +1203,67 @@ def render_overview(project: dict[str, Any]) -> None:
 def render_documents(project: dict[str, Any]) -> None:
     st.subheader("Upload Project Documents")
     uploaded = st.file_uploader("PDF, TXT, Markdown, CSV, or DOCX", type=["pdf", "txt", "md", "markdown", "csv", "docx"])
+    with st.expander("How requirement and traceability links are detected", expanded=False):
+        st.markdown(
+            """
+            For best extraction, write requirement statements with words such as `shall`, `must`, `should`, `required to`, or `needs to`.
+
+            The agent links IDs when it sees labels such as `Linked hazard`, `Hazard ID`, `Safety goal`, `Safety objective`, `Linked test case`, `Verification case`, or `Test reference`.
+
+            Recognized ID groups:
+
+            - Requirement IDs: `REQ-*`, `SYS-REQ-*`, `FR-*`, `NFR-*`, `SRS-*`, `VER-*`
+            - Hazard IDs: `HZ-*`, `HAZ-*`, `HAZARD-*`, `H-*`
+            - Safety goal IDs: `SG-*`, `SO-*`, `SAFETY-GOAL-*`, `SAFETY-OBJECTIVE-*`
+            - Test case IDs: `TC-*`, `TEST-*`, `VTC-*`, `VERIFICATION-CASE-*`
+
+            Example format: `SYS-REQ-17: The controller shall unlock within 300 ms during emergency mode and shall be verified by integration test evidence. Hazard ID: H-17. Safety objective: SO-3. Verification case: TEST-04.`
+            """
+        )
+    with st.expander("Requirement scoring checklist template", expanded=False):
+        scoring_checklist = """
+        Use this checklist before uploading a document or when reviewing extracted requirements.
+
+        Requirement identification
+        - [ ] Requirement has a stable ID, such as `REQ-*`, `SYS-REQ-*`, `FR-*`, `NFR-*`, `SRS-*`, or `VER-*`.
+        - [ ] Requirement uses requirement language such as `shall`, `must`, `should`, `required to`, or `needs to`.
+        - [ ] Requirement is written as one reviewable statement.
+
+        Requirement quality score criteria
+        - [ ] Atomicity: the requirement covers one main obligation and avoids too many combined `and` / `or` clauses.
+        - [ ] Clarity: wording avoids vague terms such as `appropriate`, `sufficient`, `robust`, `quickly`, `adequate`, or `as soon as possible`.
+        - [ ] Testability: the requirement states how it will be verified, tested, validated, measured, or evidenced.
+        - [ ] Measurability: the requirement includes a measurable threshold such as time, distance, speed, percentage, angle, frequency, or count.
+        - [ ] Traceability: the requirement links to at least one hazard and one safety goal.
+        - [ ] Ambiguity: the requirement has a single clear interpretation for engineering, safety, and test teams.
+        - [ ] Duplication: the requirement does not repeat another requirement with different wording.
+        - [ ] Conflict risk: the requirement does not contradict another requirement, safety goal, or operating assumption.
+
+        Required traceability fields
+        - [ ] Linked hazard is present, using labels such as `Linked hazard`, `Hazard ID`, `Hazardous event`, or `Risk`.
+        - [ ] Linked safety goal is present, using labels such as `Safety goal`, `Safety objective`, `Safety target`, or `Mitigation goal`.
+        - [ ] Linked test case is present, using labels such as `Linked test case`, `Verification case`, `Verification test`, or `Test reference`.
+        - [ ] Evidence source is clear, such as document name, clause, page, section, test report, log, or review artifact.
+
+        Verification and evidence readiness
+        - [ ] Test case includes scenario or operating mode.
+        - [ ] Test case includes pass/fail criteria.
+        - [ ] Test case states required evidence, such as logs, measurements, screenshots, reports, or review records.
+        - [ ] ODD or operating condition is stated, such as `ODD`, `operating mode`, `scenario`, `environment`, `night`, `rain`, `fog`, `speed`, or `lighting`.
+
+        Scoring interpretation
+        - [ ] Score near 1.00: ready for traceability review.
+        - [ ] Score below 0.75: review wording, thresholds, ODD/operating conditions, verification method, or traceability links.
+        - [ ] Missing fields should be resolved before treating the requirement as release-ready.
+        """
+        st.markdown(scoring_checklist)
+        st.download_button(
+            "Download checklist",
+            scoring_checklist.strip(),
+            "requirement_scoring_checklist.md",
+            "text/markdown",
+            use_container_width=True,
+        )
     if uploaded and st.button("Upload and index document", type="primary"):
         api_request(
             "POST",
@@ -2847,6 +2916,7 @@ def render_agent_ops(project: dict[str, Any]) -> None:
     params = {"source_system": source_system} if source_system else None
     dashboard = api_request("GET", f"/projects/{project['id']}/agent-operations/dashboard", params=params)
     runs = api_request("GET", f"/projects/{project['id']}/agent-runs", params=params)
+    mlflow = api_request("GET", "/mlflow/status")
 
     st.markdown(
         "<div class='grafana-hero'>"
@@ -2858,6 +2928,16 @@ def render_agent_ops(project: dict[str, Any]) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
+
+    st.markdown("<div class='grafana-panel-title'>MLflow tracking</div>", unsafe_allow_html=True)
+    mlflow_cols = st.columns(4)
+    mlflow_cols[0].metric("Tracking", "Enabled" if mlflow.get("enabled") else "Off")
+    mlflow_cols[1].metric("Package", "Available" if mlflow.get("available") else "Missing")
+    mlflow_cols[2].metric("Experiment", mlflow.get("experiment_name", "n/a"))
+    mlflow_cols[3].metric("Status", mlflow.get("status", "unknown"))
+    st.caption(f"Tracking URI: {mlflow.get('tracking_uri', 'n/a')}")
+    if mlflow.get("message"):
+        st.caption(mlflow["message"])
 
     st.markdown("<div class='grafana-panel-title'>Evaluation health</div>", unsafe_allow_html=True)
     cols = st.columns(6)
@@ -2918,6 +2998,113 @@ def render_agent_ops(project: dict[str, Any]) -> None:
             line_chart(ordered_runs, "created_at", "evaluation_score", "Evaluation Score Trend", color="status", y_title="Evaluation score")
         with trend_cols[3]:
             line_chart(ordered_runs, "created_at", "output_tokens", "Output Token Trend", color="model_used", y_title="Output tokens")
+
+        st.markdown("<div class='grafana-panel-title'>Model behavior graphs</div>", unsafe_allow_html=True)
+        behavior_cols = st.columns(3)
+        if {"model_used", "evaluation_score", "latency_ms", "estimated_cost_usd", "output_tokens"}.issubset(runs_frame.columns):
+            model_summary = (
+                runs_frame.groupby("model_used")
+                .agg(
+                    runs=("agent_run_id", "count"),
+                    avg_quality=("evaluation_score", "mean"),
+                    avg_latency_ms=("latency_ms", "mean"),
+                    avg_cost_usd=("estimated_cost_usd", "mean"),
+                    avg_output_tokens=("output_tokens", "mean"),
+                )
+                .reset_index()
+            )
+            model_summary["avg_quality"] = model_summary["avg_quality"].round(3)
+            model_summary["avg_latency_ms"] = model_summary["avg_latency_ms"].round(1)
+            model_summary["avg_cost_usd"] = model_summary["avg_cost_usd"].round(6)
+            model_summary["avg_output_tokens"] = model_summary["avg_output_tokens"].round(1)
+            with behavior_cols[0]:
+                horizontal_bar_chart(
+                    model_summary,
+                    "avg_quality",
+                    "model_used",
+                    "Average Quality by Model",
+                    x_title="Average evaluation score",
+                    y_title="Model",
+                )
+            with behavior_cols[1]:
+                scatter = (
+                    alt.Chart(runs_frame)
+                    .mark_circle(size=90, opacity=0.82)
+                    .encode(
+                        x=alt.X("estimated_cost_usd:Q", title="Estimated cost USD"),
+                        y=alt.Y("evaluation_score:Q", title="Evaluation score", scale=alt.Scale(domain=[0, 1])),
+                        color=alt.Color("model_used:N", title="Model"),
+                        size=alt.Size("output_tokens:Q", title="Output tokens"),
+                        tooltip=[
+                            alt.Tooltip("agent_run_id:N", title="Run"),
+                            alt.Tooltip("operation_name:N", title="Operation"),
+                            alt.Tooltip("model_used:N", title="Model"),
+                            alt.Tooltip("evaluation_score:Q", title="Quality", format=".2f"),
+                            alt.Tooltip("estimated_cost_usd:Q", title="Cost", format="$.6f"),
+                            alt.Tooltip("latency_ms:Q", title="Latency ms", format=",.0f"),
+                            alt.Tooltip("output_tokens:Q", title="Output tokens", format=",.0f"),
+                        ],
+                    )
+                    .properties(title="Quality vs Cost by Run", height=260)
+                    .configure_axis(labelColor="#cbd5e1", titleColor="#aab4c3", gridColor="#2a3344")
+                    .configure_title(color="#f5f7fb", fontSize=14, anchor="start")
+                    .configure_legend(labelColor="#cbd5e1", titleColor="#f5f7fb")
+                )
+                st.altair_chart(scatter, use_container_width=True)
+            with behavior_cols[2]:
+                behavior_rows = model_summary.melt(
+                    id_vars=["model_used"],
+                    value_vars=["avg_latency_ms", "avg_output_tokens"],
+                    var_name="behavior_metric",
+                    value_name="value",
+                )
+                grouped = (
+                    alt.Chart(behavior_rows)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("model_used:N", title="Model"),
+                        y=alt.Y("value:Q", title="Average value"),
+                        color=alt.Color("behavior_metric:N", title="Behavior metric"),
+                        xOffset="behavior_metric:N",
+                        tooltip=[
+                            alt.Tooltip("model_used:N", title="Model"),
+                            alt.Tooltip("behavior_metric:N", title="Metric"),
+                            alt.Tooltip("value:Q", title="Value", format=",.2f"),
+                        ],
+                    )
+                    .properties(title="Latency and Output Size by Model", height=260)
+                    .configure_axis(labelColor="#cbd5e1", titleColor="#aab4c3", gridColor="#2a3344")
+                    .configure_title(color="#f5f7fb", fontSize=14, anchor="start")
+                    .configure_legend(labelColor="#cbd5e1", titleColor="#f5f7fb")
+                )
+                st.altair_chart(grouped, use_container_width=True)
+        else:
+            for col in behavior_cols:
+                with col:
+                    st.info("Run more model-backed operations to compare behavior.")
+
+        if {"model_used", "hallucination_risk"}.issubset(runs_frame.columns):
+            risk_rows = runs_frame.groupby(["model_used", "hallucination_risk"]).size().reset_index(name="count")
+            risk_chart = (
+                alt.Chart(risk_rows)
+                .mark_bar()
+                .encode(
+                    x=alt.X("model_used:N", title="Model"),
+                    y=alt.Y("count:Q", title="Runs"),
+                    color=alt.Color("hallucination_risk:N", title="Hallucination risk"),
+                    xOffset="hallucination_risk:N",
+                    tooltip=[
+                        alt.Tooltip("model_used:N", title="Model"),
+                        alt.Tooltip("hallucination_risk:N", title="Risk"),
+                        alt.Tooltip("count:Q", title="Runs"),
+                    ],
+                )
+                .properties(title="Hallucination Risk by Model", height=260)
+                .configure_axis(labelColor="#cbd5e1", titleColor="#aab4c3", gridColor="#2a3344")
+                .configure_title(color="#f5f7fb", fontSize=14, anchor="start")
+                .configure_legend(labelColor="#cbd5e1", titleColor="#f5f7fb")
+            )
+            st.altair_chart(risk_chart, use_container_width=True)
 
         flag_counts = dashboard.get("hallucination_flags", {})
         tool_counts: dict[str, int] = {}

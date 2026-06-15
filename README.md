@@ -88,6 +88,65 @@ flowchart TD
     end
 ```
 
+## MLflow MLOps Tracking Flow
+
+```mermaid
+flowchart TD
+    USER[Safety Engineer] --> UI[Streamlit Workspace]
+    UI --> API[FastAPI Backend]
+
+    subgraph ProductFlow["Project 2 Product Workflow"]
+        API --> DOC[Document Upload and Chunking]
+        DOC --> RAG[Project-Specific RAG Query]
+        DOC --> REQ[Requirement Extraction]
+        REQ --> SCORE[Requirement Quality Scoring]
+        SCORE --> TRACE[Traceability Matrix]
+        TRACE --> TEST[Test Case Generation]
+        API --> OPS[AgentOps Tool Orchestration]
+    end
+
+    subgraph AppStore["Application Persistence"]
+        DB[(PostgreSQL)]
+        VDB[(Chroma Vector Store)]
+        DOC --> DB
+        DOC --> VDB
+        REQ --> DB
+        SCORE --> DB
+        TRACE --> DB
+        TEST --> DB
+        OPS --> DB
+    end
+
+    subgraph MLflow["MLflow Experiment Tracking"]
+        EXP[Experiment<br/>project2-agentic-document-ai]
+        PARAMS[Params<br/>model, prompt version, tool config]
+        METRICS[Metrics<br/>quality, latency, cost, tokens, coverage]
+        ARTIFACTS[Artifacts<br/>run payloads, summaries, evidence metadata]
+        COMPARE[Compare Runs<br/>model behavior and prompt changes]
+    end
+
+    RAG -->|evaluation run| EXP
+    REQ -->|extraction run| EXP
+    SCORE -->|quality evaluation run| EXP
+    OPS -->|agent run| EXP
+    EXP --> PARAMS
+    EXP --> METRICS
+    EXP --> ARTIFACTS
+    PARAMS --> COMPARE
+    METRICS --> COMPARE
+    ARTIFACTS --> COMPARE
+
+    COMPARE --> DECIDE[Engineering Decision<br/>keep, tune, rollback, or escalate]
+    DECIDE --> UI
+
+    classDef product fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
+    classDef store fill:#ecfdf5,stroke:#10b981,color:#0f172a;
+    classDef mlops fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
+    class DOC,RAG,REQ,SCORE,TRACE,TEST,OPS product;
+    class DB,VDB store;
+    class EXP,PARAMS,METRICS,ARTIFACTS,COMPARE mlops;
+```
+
 ## Database Diagram
 
 ```mermaid
@@ -332,7 +391,8 @@ Project 2 REST APIs:
   evaluation runs, and agent runs, with draggable persisted node layouts
 - Benchmark readiness metrics for ingestion, requirement quality, traceability
   coverage, evidence coverage, test coverage, and agent reliability
-- Evaluation run history for MLOps-style monitoring
+- Evaluation run history and optional MLflow experiment tracking for
+  MLOps-style monitoring
 - Agent operations module with run logs, cost tracking, failure reasons,
   human escalation flags, approval gates, evaluation scores, and prompt/version
   tracking
@@ -355,6 +415,8 @@ Project 2 REST APIs:
   and Slack-style notifications
 - Evaluation dashboard metrics for success rate, escalation rate, latency,
   cost, hallucination flags, and quality scores
+- Optional MLflow tracking server for requirement extraction, RAG query,
+  requirement evaluation, and AgentOps runs
 - PostgreSQL + Chroma architecture
 - Docker Compose deployment
 
@@ -456,6 +518,7 @@ GET  /models
 POST /models/select
 GET  /agent-versions
 GET  /metrics
+GET  /mlflow/status
 GET  /health
 GET  /domain-profiles
 POST /projects
@@ -597,6 +660,24 @@ Open:
 
 ```text
 http://127.0.0.1:8000/docs
+```
+
+MLflow is included in Docker Compose. The backend mirrors evaluation and
+AgentOps runs into the `project2-agentic-document-ai` experiment when
+`MLFLOW_TRACKING_ENABLED=true`.
+
+```text
+MLflow UI: http://127.0.0.1:5000
+Tracking URI in Docker: http://mlflow:5000
+Local file tracking fallback: ./mlruns
+```
+
+For a non-Docker run, enable MLflow with:
+
+```bash
+export MLFLOW_TRACKING_ENABLED=true
+export MLFLOW_TRACKING_URI=./mlruns
+export MLFLOW_EXPERIMENT_NAME=project2-agentic-document-ai
 ```
 
 ## Example Query Request

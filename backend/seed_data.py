@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from backend.requirements_engineering import score_requirement
+from backend.requirements_engineering import score_requirement, suggest_requirement_improvement
 from backend.schemas import Requirement, RequirementType
 
 
@@ -32,11 +32,12 @@ def load_seed_requirement_rows(path: Path = SEED_REQUIREMENTS_PATH) -> list[dict
 def load_seed_requirements(path: Path = SEED_REQUIREMENTS_PATH) -> list[Requirement]:
     requirements: list[Requirement] = []
     for row in load_seed_requirement_rows(path):
-        score, issues, improvement = score_requirement(
+        score, issues, _ = score_requirement(
             row["text"],
             row.get("linked_hazard"),
             row.get("linked_safety_goal"),
         )
+        linked_test_cases = row.get("linked_test_cases", [])
         requirements.append(
             Requirement(
                 id=row["id"],
@@ -46,8 +47,14 @@ def load_seed_requirements(path: Path = SEED_REQUIREMENTS_PATH) -> list[Requirem
                 linked_safety_goal=row.get("linked_safety_goal"),
                 quality_score=score.overall,
                 quality_issues=issues,
-                suggested_improvement=improvement if issues else None,
-                linked_test_cases=row.get("linked_test_cases", []),
+                suggested_improvement=suggest_requirement_improvement(
+                    issues,
+                    row.get("linked_hazard"),
+                    row.get("linked_safety_goal"),
+                    linked_test_cases,
+                    row.get("evidence_source"),
+                ),
+                linked_test_cases=linked_test_cases,
                 evidence_source=row.get("evidence_source"),
             )
         )

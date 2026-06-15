@@ -8,18 +8,53 @@ from statistics import mean
 from backend.schemas import Requirement, RequirementQualityScore, RequirementType, TestCase, TraceabilityLink
 
 
+REQ_ID_PATTERN = r"(?:[A-Z]{2,12}[-_])?(?:REQ|RQT|RQ|SR|SRS|FR|NFR|FSR|TSR|SWR|HWR|VAL|VER|MON|DATA|SYS|SW|HW)[-_A-Z0-9]*\d+"
 REQ_PATTERN = re.compile(
-    r"\s*(?P<id>(?:REQ|SR|FSR|TSR|SWR|HWR|VAL|MON|DATA)[-_A-Z0-9]*\d+)?\s*[:\-]?\s*"
+    rf"\s*(?P<id>{REQ_ID_PATTERN})?\s*[:\-]?\s*"
     r"(?P<text>[^.\n]*(?:shall|must|should|required to|needs to)[^.\n]*(?:\.|$))",
     re.IGNORECASE,
 )
 REQ_BLOCK_PATTERN = re.compile(
-    r"(?ms)^\s*(?P<id>(?:REQ|SR|FSR|TSR|SWR|HWR|VAL|MON|DATA)[-_A-Z0-9]*\d+)\s*:\s*"
-    r"(?P<body>.*?)(?=^\s*(?:REQ|SR|FSR|TSR|SWR|HWR|VAL|MON|DATA)[-_A-Z0-9]*\d+\s*:|^\s*#{1,6}\s+|\Z)",
+    rf"(?ms)^\s*(?P<id>{REQ_ID_PATTERN})\s*:\s*"
+    rf"(?P<body>.*?)(?=^\s*{REQ_ID_PATTERN}\s*:|^\s*#{{1,6}}\s+|\Z)",
     re.IGNORECASE,
 )
-HAZARD_PATTERN = re.compile(r"\b(HZ[-_A-Z0-9]*\d+)\b", re.IGNORECASE)
-SAFETY_GOAL_PATTERN = re.compile(r"\b(SG[-_A-Z0-9]*\d+)\b", re.IGNORECASE)
+HAZARD_PATTERN = re.compile(r"\b((?:HZ|HAZ|HAZARD|H)[-_]?[A-Z0-9]*(?:[-_][A-Z0-9]+)*\d[A-Z0-9_-]*)\b", re.IGNORECASE)
+SAFETY_GOAL_PATTERN = re.compile(
+    r"\b((?:SG|SAFETY[-_]?GOAL|SAFETY[-_]?OBJECTIVE|SO)[-_]?[A-Z0-9]*(?:[-_][A-Z0-9]+)*\d[A-Z0-9_-]*)\b",
+    re.IGNORECASE,
+)
+TEST_CASE_PATTERN = re.compile(
+    r"\b((?:TC|TST|TEST|TEST[-_]?CASE|VTC|VT|VERIFICATION[-_]?CASE)[-_]?[A-Z0-9]*(?:[-_][A-Z0-9]+)*\d[A-Z0-9_-]*)\b",
+    re.IGNORECASE,
+)
+GENERIC_LINK_ID_PATTERN = re.compile(r"\b([A-Z][A-Z0-9]{0,12}(?:[-_][A-Z0-9]+)+|[A-Z]{1,8}\d{1,6})\b", re.IGNORECASE)
+LINK_SEGMENT_PATTERN = re.compile(r"(?P<label>{labels})\s*(?:id|ids|ref|refs|reference|references)?\s*(?:[:=#-]|\bto\b|\bis\b)?\s*(?P<value>[^.;\n]*)", re.IGNORECASE)
+
+HAZARD_LABELS = [
+    "linked hazard",
+    "hazard",
+    "hazardous event",
+    "hazard event",
+    "risk",
+]
+SAFETY_GOAL_LABELS = [
+    "linked safety goal",
+    "safety goal",
+    "safety objective",
+    "safety target",
+    "mitigation goal",
+]
+TEST_CASE_LABELS = [
+    "linked test case",
+    "linked test cases",
+    "test case",
+    "test cases",
+    "verification case",
+    "verification test",
+    "validation case",
+    "test reference",
+]
 
 
 def classify_requirement(text: str) -> RequirementType:
@@ -49,7 +84,25 @@ def score_requirement(text: str, linked_hazard: str | None, linked_safety_goal: 
     vague_terms = ["appropriate", "sufficient", "robust", "as soon as possible", "quickly", "adequate"]
     measurable = bool(re.search(r"\b\d+(\.\d+)?\s?(ms|s|m|km/h|%|deg|lux|fps|hz|seconds|meters)\b", lower))
     verification = any(term in lower for term in ["test", "verify", "validate", "measure", "evidence", "pass"])
-    odd = any(term in lower for term in ["odd", "operational design domain", "night", "rain", "fog", "occlusion", "speed", "lighting"])
+    odd = any(
+        term in lower
+        for term in [
+            "odd",
+            "operational design domain",
+            "operating condition",
+            "operational condition",
+            "operating mode",
+            "mode",
+            "scenario",
+            "environment",
+            "night",
+            "rain",
+            "fog",
+            "occlusion",
+            "speed",
+            "lighting",
+        ]
+    )
     ambiguous = any(term in lower for term in vague_terms)
     atomic = lower.count(" and ") + lower.count(" or ") <= 2
 
@@ -92,6 +145,40 @@ def score_requirement(text: str, linked_hazard: str | None, linked_safety_goal: 
     return score, issues, improvement
 
 
+def suggest_requirement_improvement(
+    issues: list[str],
+    linked_hazard: str | None,
+    linked_safety_goal: str | None,
+    linked_test_cases: list[str] | None = None,
+    evidence_source: str | None = None,
+) -> str | None:
+    """Build user-facing improvement guidance from quality and traceability gaps."""
+    suggestions: list[str] = []
+    wording_issues = {
+        "too vague",
+        "missing verification method",
+        "missing measurable threshold",
+        "missing ODD condition",
+        "not atomic",
+    }
+    if any(issue in wording_issues for issue in issues):
+        suggestions.append(
+            "Add measurable thresholds, ODD boundaries, and a verification method; split combined statements if needed."
+        )
+    if not linked_hazard:
+        suggestions.append("Link this requirement to the originating hazard or hazardous event.")
+    if not linked_safety_goal:
+        suggestions.append("Link this requirement to the safety goal or mitigation it supports.")
+    if not linked_test_cases:
+        suggestions.append(
+            "Link this requirement to at least one verification test case with scenario, "
+            "pass/fail criteria, and required evidence."
+        )
+    if not evidence_source:
+        suggestions.append("Attach an evidence source such as the originating document, clause, page, or review artifact.")
+    return " ".join(dict.fromkeys(suggestions)) or None
+
+
 def extract_requirements_from_text(text: str, evidence_source: str | None = None) -> list[Requirement]:
     requirements: list[Requirement] = []
     seen: set[str] = set()
@@ -128,9 +215,10 @@ def _append_requirement(
     if len(req_text) < 20 or req_text.lower() in seen:
         return False
     seen.add(req_text.lower())
-    hazard = _first_match(HAZARD_PATTERN, traceability_text)
-    safety_goal = _first_match(SAFETY_GOAL_PATTERN, traceability_text)
-    score, issues, improvement = score_requirement(traceability_text or req_text, hazard, safety_goal)
+    hazard = _first_linked_id(traceability_text, HAZARD_LABELS, HAZARD_PATTERN)
+    safety_goal = _first_linked_id(traceability_text, SAFETY_GOAL_LABELS, SAFETY_GOAL_PATTERN)
+    linked_test_cases = _linked_ids(traceability_text, TEST_CASE_LABELS, TEST_CASE_PATTERN)
+    score, issues, _ = score_requirement(traceability_text or req_text, hazard, safety_goal)
     requirements.append(
         Requirement(
             id=req_id,
@@ -140,7 +228,14 @@ def _append_requirement(
             linked_safety_goal=safety_goal,
             quality_score=score.overall,
             quality_issues=issues,
-            suggested_improvement=improvement if issues else None,
+            suggested_improvement=suggest_requirement_improvement(
+                issues,
+                hazard,
+                safety_goal,
+                linked_test_cases,
+                evidence_source,
+            ),
+            linked_test_cases=linked_test_cases,
             evidence_source=evidence_source,
         )
     )
@@ -160,14 +255,15 @@ def _normalize_requirement_block(text: str) -> str:
 def _requirement_statement(block_text: str) -> str:
     if not block_text:
         return ""
-    split_markers = [
-        " Linked hazard:",
-        " Linked Hazard:",
-        " linked hazard:",
-        " Linked safety goal:",
-        " Linked Safety Goal:",
-        " linked safety goal:",
-    ]
+    split_labels = [*HAZARD_LABELS, *SAFETY_GOAL_LABELS, *TEST_CASE_LABELS]
+    split_markers = []
+    for label in split_labels:
+        split_markers.extend([
+            f" {label}:",
+            f" {label.title()}:",
+            f" {label} ID:",
+            f" {label.title()} ID:",
+        ])
     cut = len(block_text)
     for marker in split_markers:
         marker_index = block_text.find(marker)
@@ -332,7 +428,7 @@ def generate_requirements_from_standards(
 
     requirements: list[Requirement] = []
     for template in templates:
-        score, issues, improvement = score_requirement(template["text"], template["hazard"], template["safety_goal"])
+        score, issues, _ = score_requirement(template["text"], template["hazard"], template["safety_goal"])
         requirements.append(
             Requirement(
                 id=template["id"],
@@ -342,7 +438,13 @@ def generate_requirements_from_standards(
                 linked_safety_goal=template["safety_goal"],
                 quality_score=score.overall,
                 quality_issues=issues,
-                suggested_improvement=improvement if issues else f"Review project-specific thresholds and ODD assumptions for {domain}.",
+                suggested_improvement=suggest_requirement_improvement(
+                    issues,
+                    template["hazard"],
+                    template["safety_goal"],
+                    [],
+                    template["source"],
+                ),
                 evidence_source=template["source"],
             )
         )
@@ -406,3 +508,36 @@ def generate_test_cases(requirements: list[Requirement]) -> list[TestCase]:
 def _first_match(pattern: re.Pattern, text: str) -> str | None:
     match = pattern.search(text)
     return match.group(1).upper() if match else None
+
+
+def _all_matches(pattern: re.Pattern, text: str) -> list[str]:
+    return list(dict.fromkeys(match.group(1).upper() for match in pattern.finditer(text)))
+
+
+def _first_linked_id(text: str, labels: list[str], fallback_pattern: re.Pattern) -> str | None:
+    ids = _linked_ids(text, labels, fallback_pattern)
+    return ids[0] if ids else None
+
+
+def _linked_ids(text: str, labels: list[str], fallback_pattern: re.Pattern) -> list[str]:
+    label_ids = _ids_after_labels(text, labels)
+    fallback_ids = _all_matches(fallback_pattern, text)
+    return list(dict.fromkeys([*label_ids, *fallback_ids]))
+
+
+def _ids_after_labels(text: str, labels: list[str]) -> list[str]:
+    labels_pattern = "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
+    segment_pattern = re.compile(LINK_SEGMENT_PATTERN.pattern.format(labels=labels_pattern), re.IGNORECASE)
+    stop_labels = [
+        label for label in [*HAZARD_LABELS, *SAFETY_GOAL_LABELS, *TEST_CASE_LABELS]
+        if label not in labels
+    ]
+    stop_pattern = re.compile(r"\b(?:" + "|".join(re.escape(label) for label in sorted(stop_labels, key=len, reverse=True)) + r")\b", re.IGNORECASE)
+    ids: list[str] = []
+    for match in segment_pattern.finditer(text):
+        value = match.group("value")
+        stop_match = stop_pattern.search(value)
+        if stop_match:
+            value = value[:stop_match.start()]
+        ids.extend(match.group(1).upper() for match in GENERIC_LINK_ID_PATTERN.finditer(value))
+    return list(dict.fromkeys(ids))

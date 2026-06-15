@@ -26,6 +26,7 @@ from backend.database import get_session, init_db
 from backend.domain_profiles import infer_domain_profile, list_domain_profiles
 from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
+from backend.mlflow_tracking import log_evaluation_run, mlflow_status
 from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectConversationMessageRecord, ProjectConversationRecord, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
@@ -260,6 +261,11 @@ def metrics(session: Session = Depends(get_session)) -> str:
         f"safety_platform_output_tokens_total {total_output_tokens}",
     ]
     return "\n".join(lines) + "\n"
+
+
+@app.get("/mlflow/status")
+def get_mlflow_status() -> dict[str, Any]:
+    return mlflow_status()
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -560,6 +566,7 @@ def query_project(project_id: int, payload: QueryRequest, session: Session = Dep
     session.add(run)
     session.commit()
     session.refresh(run)
+    log_evaluation_run(run, session.get(Project, project_id))
     run_quality_score = _query_quality_score(retrieved, missing_requirements)
     create_agent_run_log(
         project_id,
@@ -649,21 +656,22 @@ def safety_analysis(project_id: int, payload: QueryRequest, session: Session = D
 
 @app.post("/projects/{project_id}/requirements/extract", response_model=RequirementExtractionResponse)
 def extract_requirements(project_id: int, session: Session = Depends(get_session)) -> RequirementExtractionResponse:
-    _project_or_404(project_id, session)
+    project = _project_or_404(project_id, session)
     requirements = _extract_project_requirements(project_id)
     _replace_requirements(project_id, requirements, session)
     summary = quality_summary(requirements)
-    session.add(
-        EvaluationRunRecord(
-            project_id=project_id,
-            run_type="requirements_extract",
-            model_used="heuristic-pydantic-extractor",
-            retrieved_chunk_count=len(requirements),
-            requirement_quality_summary=summary,
-            quality_score=summary.get("average_quality_score", 0.0),
-        )
+    run = EvaluationRunRecord(
+        project_id=project_id,
+        run_type="requirements_extract",
+        model_used="heuristic-pydantic-extractor",
+        retrieved_chunk_count=len(requirements),
+        requirement_quality_summary=summary,
+        quality_score=summary.get("average_quality_score", 0.0),
     )
+    session.add(run)
     session.commit()
+    session.refresh(run)
+    log_evaluation_run(run, project)
     return RequirementExtractionResponse(requirements=requirements, quality_summary=summary)
 
 
@@ -692,40 +700,42 @@ def generate_requirements_from_iso_standards(
     requirements = generated if payload.replace_existing else _stored_requirements(project_id, session) + generated
     _replace_requirements(project_id, requirements, session)
     summary = quality_summary(generated)
-    session.add(
-        EvaluationRunRecord(
-            project_id=project_id,
-            run_type="requirements_generate_from_standards",
-            model_used="iso-candidate-template-generator",
-            retrieved_chunk_count=len(generated),
-            quality_score=summary.get("average_quality_score", 0.0),
-            requirement_quality_summary={
-                **summary,
-                "standards": standards,
-                "note": "Candidate requirements generated from ISO clause areas; verify against licensed standards before production use.",
-            },
-        )
+    run = EvaluationRunRecord(
+        project_id=project_id,
+        run_type="requirements_generate_from_standards",
+        model_used="iso-candidate-template-generator",
+        retrieved_chunk_count=len(generated),
+        quality_score=summary.get("average_quality_score", 0.0),
+        requirement_quality_summary={
+            **summary,
+            "standards": standards,
+            "note": "Candidate requirements generated from ISO clause areas; verify against licensed standards before production use.",
+        },
     )
+    session.add(run)
     session.commit()
+    session.refresh(run)
+    log_evaluation_run(run, project)
     return RequirementExtractionResponse(requirements=generated, quality_summary=summary)
 
 
 @app.post("/projects/{project_id}/requirements/evaluate", response_model=RequirementExtractionResponse)
 def evaluate_requirements(project_id: int, payload: RequirementEvaluateRequest, session: Session = Depends(get_session)) -> RequirementExtractionResponse:
-    _project_or_404(project_id, session)
+    project = _project_or_404(project_id, session)
     requirements = payload.requirements or _stored_requirements(project_id, session)
     summary = quality_summary(requirements)
-    session.add(
-        EvaluationRunRecord(
-            project_id=project_id,
-            run_type="requirements_evaluate",
-            model_used="heuristic-quality-scorer",
-            retrieved_chunk_count=len(requirements),
-            quality_score=summary.get("average_quality_score", 0.0),
-            requirement_quality_summary=summary,
-        )
+    run = EvaluationRunRecord(
+        project_id=project_id,
+        run_type="requirements_evaluate",
+        model_used="heuristic-quality-scorer",
+        retrieved_chunk_count=len(requirements),
+        quality_score=summary.get("average_quality_score", 0.0),
+        requirement_quality_summary=summary,
     )
+    session.add(run)
     session.commit()
+    session.refresh(run)
+    log_evaluation_run(run, project)
     return RequirementExtractionResponse(requirements=requirements, quality_summary=summary)
 
 

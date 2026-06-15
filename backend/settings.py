@@ -41,6 +41,9 @@ class BackendSettings:
     local_llm_num_predict: int = int(os.getenv("LOCAL_LLM_NUM_PREDICT", "1200"))
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    mlflow_tracking_enabled: bool = env_bool("MLFLOW_TRACKING_ENABLED", "false")
+    mlflow_tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", project_path("./mlruns"))
+    mlflow_experiment_name: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "project2-agentic-document-ai")
     demo_username: str = os.getenv("DEMO_USERNAME", "demo@safetyflow.local")
     demo_password: str = os.getenv("DEMO_PASSWORD", "demo-password")
     cors_origins: list[str] = [

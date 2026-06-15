@@ -204,6 +204,15 @@ def test_query_can_select_local_answer_engine_without_running_local_model():
         assert query.json()["retrieved_sources"]
 
 
+def test_mlflow_status_endpoint_reports_tracking_configuration():
+    with TestClient(app) as client:
+        response = client.get("/mlflow/status")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {"enabled", "available", "tracking_uri", "experiment_name", "status", "message"}.issubset(body)
+
+
 def test_generate_requirements_from_iso_standards():
     with TestClient(app) as client:
         project = client.post(

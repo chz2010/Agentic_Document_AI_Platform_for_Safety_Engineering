@@ -9,6 +9,9 @@ services:
       DATABASE_URL: postgresql+psycopg://safety:safety@postgres:5432/safety_platform
       PROJECT_CHROMA_PATH: /app/vectordb/project_docs
       UPLOADS_DIR: /app/data/uploads
+      MLFLOW_TRACKING_ENABLED: "true"
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: project2-agentic-document-ai
     ports:
       - "8000:8000"
     volumes:
@@ -17,6 +20,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mlflow:
+        condition: service_started
+
+  mlflow:
+    image: python:3.11-slim
+    command: >
+      sh -c "pip install mlflow==2.16.2 &&
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
 
   postgres:
     image: postgres:16-alpine
@@ -35,3 +52,4 @@ services:
       retries: 10
 volumes:
   postgres_data:
+  mlflow_data:
