@@ -213,6 +213,22 @@ def test_mlflow_status_endpoint_reports_tracking_configuration():
         assert {"enabled", "available", "tracking_uri", "experiment_name", "status", "message"}.issubset(body)
 
 
+def test_neo4j_status_and_disabled_query_are_safe_without_server():
+    with TestClient(app) as client:
+        status = client.get("/neo4j/status")
+        assert status.status_code == 200
+        assert {"enabled", "available", "uri", "database", "status", "message"}.issubset(status.json())
+
+        project = client.post(
+            "/projects",
+            json={"name": "Neo4j Disabled Query Project", "domain": "Safety", "system_type": "Graph"},
+        ).json()
+        query = client.get(f"/projects/{project['id']}/neo4j/query", params={"query_type": "missing_test_cases"})
+        assert query.status_code == 200
+        assert query.json()["query_type"] == "missing_test_cases"
+        assert "MATCH" in query.json()["cypher"]
+
+
 def test_generate_requirements_from_iso_standards():
     with TestClient(app) as client:
         project = client.post(

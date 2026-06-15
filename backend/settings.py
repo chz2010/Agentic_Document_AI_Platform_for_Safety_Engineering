@@ -44,6 +44,10 @@ class BackendSettings:
     mlflow_tracking_enabled: bool = env_bool("MLFLOW_TRACKING_ENABLED", "false")
     mlflow_tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", project_path("./mlruns"))
     mlflow_experiment_name: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "project2-agentic-document-ai")
+    neo4j_enabled: bool = env_bool("NEO4J_ENABLED", "false")
+    neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "safetygraph")
     demo_username: str = os.getenv("DEMO_USERNAME", "demo@safetyflow.local")
     demo_password: str = os.getenv("DEMO_PASSWORD", "demo-password")
     cors_origins: list[str] = [

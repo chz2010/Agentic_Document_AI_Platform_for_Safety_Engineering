@@ -27,6 +27,7 @@ from backend.domain_profiles import infer_domain_profile, list_domain_profiles
 from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
 from backend.mlflow_tracking import log_evaluation_run, mlflow_status
+from backend.neo4j_graph import neo4j_status, run_neo4j_traceability_query, sync_knowledge_graph_to_neo4j
 from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectConversationMessageRecord, ProjectConversationRecord, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
@@ -56,6 +57,9 @@ from backend.schemas import (
     ModelInfo,
     ModelSelectRequest,
     ModelSelectionRead,
+    Neo4jQueryResponse,
+    Neo4jStatus,
+    Neo4jSyncResponse,
     ProjectCreate,
     ProjectConversationCreate,
     ProjectConversationMessageCreate,
@@ -266,6 +270,11 @@ def metrics(session: Session = Depends(get_session)) -> str:
 @app.get("/mlflow/status")
 def get_mlflow_status() -> dict[str, Any]:
     return mlflow_status()
+
+
+@app.get("/neo4j/status", response_model=Neo4jStatus)
+def get_neo4j_status() -> Neo4jStatus:
+    return neo4j_status()
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -672,6 +681,7 @@ def extract_requirements(project_id: int, session: Session = Depends(get_session
     session.commit()
     session.refresh(run)
     log_evaluation_run(run, project)
+    _sync_project_neo4j_best_effort(project_id, session)
     return RequirementExtractionResponse(requirements=requirements, quality_summary=summary)
 
 
@@ -681,6 +691,7 @@ def generate_requirements(project_id: int, payload: QueryRequest, session: Sessi
     text = "\n".join(response.missing_requirements) or f"The system shall address: {payload.question}."
     requirements = extract_requirements_from_text(text, "generated_from_safety_analysis")
     _replace_requirements(project_id, _stored_requirements(project_id, session) + requirements, session)
+    _sync_project_neo4j_best_effort(project_id, session)
     return RequirementExtractionResponse(requirements=requirements, quality_summary=quality_summary(requirements))
 
 
@@ -716,6 +727,7 @@ def generate_requirements_from_iso_standards(
     session.commit()
     session.refresh(run)
     log_evaluation_run(run, project)
+    _sync_project_neo4j_best_effort(project_id, session)
     return RequirementExtractionResponse(requirements=generated, quality_summary=summary)
 
 
@@ -750,6 +762,30 @@ def get_traceability(project_id: int, format: str = Query(default="json", patter
 
 @app.get("/projects/{project_id}/knowledge-graph", response_model=KnowledgeGraphResponse)
 def get_knowledge_graph(project_id: int, session: Session = Depends(get_session)) -> KnowledgeGraphResponse:
+    return _project_knowledge_graph(project_id, session)
+
+
+@app.post("/projects/{project_id}/neo4j/sync", response_model=Neo4jSyncResponse)
+def sync_project_neo4j_graph(project_id: int, session: Session = Depends(get_session)) -> Neo4jSyncResponse:
+    graph = _project_knowledge_graph(project_id, session)
+    return sync_knowledge_graph_to_neo4j(graph)
+
+
+@app.get("/projects/{project_id}/neo4j/query", response_model=Neo4jQueryResponse)
+def query_project_neo4j_graph(
+    project_id: int,
+    query_type: str = Query(default="missing_test_cases", pattern="^(missing_test_cases|missing_hazards|missing_safety_goals|evidence_chain)$"),
+    requirement_id: str | None = None,
+    session: Session = Depends(get_session),
+) -> Neo4jQueryResponse:
+    _project_or_404(project_id, session)
+    try:
+        return run_neo4j_traceability_query(project_id, query_type, requirement_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _project_knowledge_graph(project_id: int, session: Session) -> KnowledgeGraphResponse:
     project = _project_or_404(project_id, session)
     requirements = _stored_requirements(project_id, session)
     traceability = build_traceability(requirements)
@@ -768,6 +804,13 @@ def get_knowledge_graph(project_id: int, session: Session = Depends(get_session)
         evaluation_runs=evaluation_runs,
         agent_runs=agent_runs,
     )
+
+
+def _sync_project_neo4j_best_effort(project_id: int, session: Session) -> None:
+    try:
+        sync_knowledge_graph_to_neo4j(_project_knowledge_graph(project_id, session))
+    except Exception:
+        return
 
 
 @app.get("/projects/{project_id}/knowledge-graph/layout", response_model=KnowledgeGraphLayout)
@@ -845,9 +888,12 @@ def evaluate_project_benchmark(project_id: int, session: Session = Depends(get_s
 def create_test_cases(project_id: int, session: Session = Depends(get_session)) -> list[TestCase]:
     _project_or_404(project_id, session)
     test_cases = generate_test_cases(_stored_requirements(project_id, session))
+    for record in session.exec(select(TestCaseRecord).where(TestCaseRecord.project_id == project_id)).all():
+        session.delete(record)
     for test_case in test_cases:
         session.add(TestCaseRecord(project_id=project_id, test_case_id=test_case.id, payload=test_case.model_dump(mode="json")))
     session.commit()
+    _sync_project_neo4j_best_effort(project_id, session)
     return test_cases
 
 

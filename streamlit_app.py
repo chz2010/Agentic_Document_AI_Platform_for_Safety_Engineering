@@ -19,6 +19,19 @@ import streamlit.components.v1 as components
 DEFAULT_API_URL = os.getenv("SAFETY_BACKEND_API_URL", "http://127.0.0.1:8000")
 SEED_DOCUMENT = Path(__file__).parent / "datasets" / "seed_requirements" / "automotive_safety_requirements.md"
 SEED_DEMO_PROJECT_NAME = "Seed Demo - AEB and Perception Safety Requirements"
+DEMO_TEST_PROJECT_NAMES = {
+    "AEB Pedestrian Platform",
+    "Agent Operations Project",
+    "Agent Ops Project",
+    "Conversation Action Project",
+    "First Project Workflow",
+    "ISO Starter Requirements",
+    "Local Engine Selection",
+    "Multi Retrieval Project",
+    "Neo4j Disabled Query Project",
+    "Railway Benchmark Project",
+    "Temporary Delete Project",
+}
 
 
 st.set_page_config(
@@ -887,6 +900,63 @@ def load_projects() -> list[dict[str, Any]]:
     return api_request("GET", "/projects")
 
 
+def clear_project_result_state() -> None:
+    for key in ["last_query_result", "retrieval_result", "precision_result", "tool_result"]:
+        st.session_state.pop(key, None)
+
+
+def project_name_counts(projects: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for project in projects:
+        name = project.get("name") or f"Project {project.get('id')}"
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def project_display_name(project: dict[str, Any], name_counts: dict[str, int]) -> str:
+    name = project.get("name") or f"Project {project.get('id')}"
+    if name_counts.get(name, 0) > 1:
+        return f"{name}  #{project.get('id')}"
+    return name
+
+
+def demo_test_cleanup_candidates(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seed_projects = sorted(
+        [project for project in projects if project.get("name") == SEED_DEMO_PROJECT_NAME],
+        key=lambda project: project.get("id") or 0,
+    )
+    keep_seed_id = seed_projects[0].get("id") if seed_projects else None
+    grouped_by_name: dict[str, list[dict[str, Any]]] = {}
+    for project in projects:
+        name = project.get("name") or f"Project {project.get('id')}"
+        grouped_by_name.setdefault(name, []).append(project)
+    duplicate_ids_to_remove: set[int] = set()
+    for same_name_projects in grouped_by_name.values():
+        sorted_group = sorted(same_name_projects, key=lambda project: project.get("id") or 0)
+        duplicate_ids_to_remove.update(
+            int(project["id"])
+            for project in sorted_group[1:]
+            if project.get("id") is not None
+        )
+    candidates: list[dict[str, Any]] = []
+    seen_candidate_ids: set[int] = set()
+    for project in projects:
+        name = project.get("name") or ""
+        project_id = project.get("id")
+        if project_id is None:
+            continue
+        if name in DEMO_TEST_PROJECT_NAMES:
+            candidates.append({**project, "cleanup_reason": "test/demo project"})
+            seen_candidate_ids.add(int(project_id))
+        elif name == SEED_DEMO_PROJECT_NAME and project.get("id") != keep_seed_id:
+            candidates.append({**project, "cleanup_reason": "duplicate seed demo"})
+            seen_candidate_ids.add(int(project_id))
+        elif int(project_id) in duplicate_ids_to_remove and int(project_id) not in seen_candidate_ids:
+            candidates.append({**project, "cleanup_reason": "duplicate project name"})
+            seen_candidate_ids.add(int(project_id))
+    return sorted(candidates, key=lambda project: ((project.get("name") or "").casefold(), project.get("id") or 0))
+
+
 def load_domain_profiles() -> list[dict[str, Any]]:
     try:
         return api_request("GET", "/domain-profiles")
@@ -921,10 +991,15 @@ def project_domain_profile(project: dict[str, Any], profiles: list[dict[str, Any
 def selected_project(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not projects:
         return None
+    name_counts = project_name_counts(projects)
+    sorted_projects = sorted(
+        projects,
+        key=lambda project: ((project.get("name") or "").casefold(), project.get("id") or 0),
+    )
     return st.sidebar.selectbox(
         "Project",
-        projects,
-        format_func=lambda project: project.get("name", f"Project {project.get('id')}"),
+        sorted_projects,
+        format_func=lambda project: project_display_name(project, name_counts),
     )
 
 
@@ -1083,14 +1158,44 @@ def render_project_sidebar() -> dict[str, Any] | None:
             if st.button("Delete project", use_container_width=True, key=f"delete_project_{project['id']}"):
                 if confirmation.strip() == str(project["id"]):
                     api_request("DELETE", f"/projects/{project['id']}")
-                    st.session_state.pop("last_query_result", None)
-                    st.session_state.pop("retrieval_result", None)
-                    st.session_state.pop("precision_result", None)
-                    st.session_state.pop("tool_result", None)
+                    clear_project_result_state()
                     st.success("Project deleted.")
                     st.rerun()
                 else:
                     st.error("Project ID confirmation does not match.")
+        cleanup_candidates = demo_test_cleanup_candidates(projects)
+        with st.sidebar.expander("Cleanup demo/test/duplicate projects", expanded=False):
+            if not cleanup_candidates:
+                st.caption("No known demo/test or duplicate-name projects found.")
+            else:
+                st.caption(
+                    "Deletes known test/demo workspaces. For other repeated project names, "
+                    "the lowest project ID is kept."
+                )
+                preview_rows = [
+                    {
+                        "ID": candidate.get("id"),
+                        "Project": candidate.get("name"),
+                        "Reason": candidate.get("cleanup_reason"),
+                    }
+                    for candidate in cleanup_candidates
+                ]
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
+                cleanup_confirmation = st.text_input("Type CLEANUP to confirm", key="cleanup_demo_test_confirm")
+                cleanup_ready = cleanup_confirmation.strip().upper() == "CLEANUP"
+                if st.button(
+                    "Delete demo/test projects",
+                    use_container_width=True,
+                    key="cleanup_demo_test_projects",
+                    disabled=not cleanup_ready,
+                ):
+                    deleted_count = 0
+                    for candidate in cleanup_candidates:
+                        api_request("DELETE", f"/projects/{candidate['id']}")
+                        deleted_count += 1
+                    clear_project_result_state()
+                    st.success(f"Deleted {deleted_count} demo/test project(s).")
+                    st.rerun()
     return project
 
 
@@ -2092,6 +2197,43 @@ def render_knowledge_graph(project: dict[str, Any]) -> None:
         st.info("No graph data yet. Upload a document, extract requirements, and generate test cases to populate the graph.")
         return
 
+    st.markdown("<div class='grafana-panel-title'>Neo4j graph database</div>", unsafe_allow_html=True)
+    neo4j_status = api_request("GET", "/neo4j/status")
+    neo4j_cols = st.columns(5)
+    neo4j_cols[0].metric("Neo4j", "Enabled" if neo4j_status.get("enabled") else "Off")
+    neo4j_cols[1].metric("Driver", "Available" if neo4j_status.get("available") else "Missing")
+    neo4j_cols[2].metric("Status", neo4j_status.get("status", "unknown"))
+    neo4j_cols[3].metric("Database", neo4j_status.get("database", "neo4j"))
+    neo4j_cols[4].metric("Browser", "7474")
+    st.caption(f"Neo4j URI: {neo4j_status.get('uri', 'n/a')}")
+    st.caption(neo4j_status.get("message", ""))
+    neo4j_action_cols = st.columns([0.22, 0.28, 0.28, 0.22])
+    if neo4j_action_cols[0].button("Sync graph to Neo4j", use_container_width=True):
+        st.session_state["neo4j_sync_result"] = api_request("POST", f"/projects/{project['id']}/neo4j/sync")
+    query_labels = {
+        "Requirements missing test cases": "missing_test_cases",
+        "Requirements missing hazards": "missing_hazards",
+        "Requirements missing safety goals": "missing_safety_goals",
+        "Evidence chain": "evidence_chain",
+    }
+    selected_query_label = neo4j_action_cols[1].selectbox("Cypher query", list(query_labels.keys()))
+    requirement_filter = neo4j_action_cols[2].text_input("Requirement ID filter", value="", placeholder="Optional, e.g. REQ-001")
+    if neo4j_action_cols[3].button("Run Cypher query", use_container_width=True):
+        params = {"query_type": query_labels[selected_query_label]}
+        if requirement_filter.strip():
+            params["requirement_id"] = requirement_filter.strip()
+        st.session_state["neo4j_query_result"] = api_request("GET", f"/projects/{project['id']}/neo4j/query", params=params)
+    if st.session_state.get("neo4j_sync_result"):
+        result = st.session_state["neo4j_sync_result"]
+        st.caption(f"Neo4j sync: {result.get('message')} Nodes: {result.get('nodes', 0)} Edges: {result.get('edges', 0)}")
+    if st.session_state.get("neo4j_query_result"):
+        result = st.session_state["neo4j_query_result"]
+        st.code(result.get("cypher", ""), language="cypher")
+        wrapped_table(
+            result.get("rows", []),
+            list(result.get("rows", [{}])[0].keys()) if result.get("rows") else ["message"],
+        )
+
     st.markdown("<div class='grafana-panel-title'>Interactive relationship map</div>", unsafe_allow_html=True)
     saved_layout = api_request("GET", f"/projects/{project['id']}/knowledge-graph/layout").get("positions", {})
     render_interactive_knowledge_graph(project["id"], nodes, edges, saved_layout)
@@ -2270,9 +2412,10 @@ def render_interactive_knowledge_graph(
         label_anchor = "start" if node["x"] < 760 else "end"
         label_dx = 12 if label_anchor == "start" else -12
         node_id = html.escape(str(node.get("id") or ""), quote=True)
+        node_group = html.escape(str(node.get("group") or node_type), quote=True)
         node_markup.append(
             f"""
-            <g class="kg-node" data-node-id="{node_id}" transform="translate({node['x']:.1f} {node['y']:.1f})">
+            <g class="kg-node" data-node-id="{node_id}" data-node-group="{node_group}" transform="translate({node['x']:.1f} {node['y']:.1f})">
               <circle cx="0" cy="0" r="{node['size']:.1f}" fill="{color}" />
               <text x="{label_dx:.1f}" y="4" text-anchor="{label_anchor}">{html.escape(short_label)}</text>
             </g>
@@ -2372,6 +2515,14 @@ def render_interactive_knowledge_graph(
           stroke-width: 1.5;
           filter: drop-shadow(0 0 10px rgba(125,211,252,0.85));
         }}
+        .kg-node.group-selected circle {{
+          stroke: #f8fafc;
+          stroke-width: 2.1;
+          filter: drop-shadow(0 0 12px rgba(251,191,36,0.95));
+        }}
+        .kg-node.group-selected text {{
+          fill: #f8fafc;
+        }}
         .kg-node text {{
           fill: #cbd5e1;
           font-size: 10.5px;
@@ -2455,6 +2606,20 @@ def render_interactive_knowledge_graph(
           overflow: auto;
           white-space: pre-wrap;
         }}
+        .kg-help {{
+          color: #aab4c3;
+          font-size: 0.78rem;
+          line-height: 1.45;
+          margin-top: 12px;
+        }}
+        .kg-selection-box {{
+          fill: rgba(96,165,250,0.14);
+          stroke: #93c5fd;
+          stroke-width: 1.4;
+          stroke-dasharray: 5 4;
+          pointer-events: none;
+          display: none;
+        }}
         @media (max-width: 900px) {{
           .kg-shell {{
             grid-template-columns: 1fr;
@@ -2470,6 +2635,7 @@ def render_interactive_knowledge_graph(
           <g>
             {''.join(node_markup)}
           </g>
+          <rect class="kg-selection-box" x="0" y="0" width="0" height="0"></rect>
         </svg>
       </div>
       <div class="kg-side">
@@ -2480,11 +2646,13 @@ def render_interactive_knowledge_graph(
         <div class="kg-panel" id="kg-detail">
           <div class="kg-panel-title">Selected Relationship</div>
           <div class="kg-detail-empty">Click an edge in the graph to inspect how two entities are linked.</div>
+          <div class="kg-help">Click one node to select it. Click and drag empty graph space to draw a selection box around multiple nodes, then drag any selected node to move the selection together.</div>
         </div>
       </div>
       <script>
         const detail = document.getElementById("kg-detail");
         const svg = document.querySelector(".kg-canvas");
+        const selectionBox = document.querySelector(".kg-selection-box");
         const nodePositions = {node_positions_json};
         const apiUrl = {api_url_json};
         const projectId = {int(project_id)};
@@ -2527,39 +2695,132 @@ def render_interactive_knowledge_graph(
           }}, 450);
         }};
         let activeNode = null;
+        let activeSelection = null;
+        const selectedNodeElements = () => Array.from(document.querySelectorAll(".kg-node.group-selected"));
+        const clearGroupSelection = () => {{
+          document.querySelectorAll(".kg-node.group-selected").forEach((node) => node.classList.remove("group-selected"));
+        }};
+        const selectNode = (node) => {{
+          clearGroupSelection();
+          node.classList.add("group-selected");
+        }};
+        const setSelectionBox = (start, end) => {{
+          const x = Math.min(start.x, end.x);
+          const y = Math.min(start.y, end.y);
+          const width = Math.abs(end.x - start.x);
+          const height = Math.abs(end.y - start.y);
+          selectionBox.setAttribute("x", x);
+          selectionBox.setAttribute("y", y);
+          selectionBox.setAttribute("width", width);
+          selectionBox.setAttribute("height", height);
+          selectionBox.style.display = "block";
+          return {{ x, y, width, height }};
+        }};
+        const hideSelectionBox = () => {{
+          selectionBox.style.display = "none";
+          selectionBox.setAttribute("width", 0);
+          selectionBox.setAttribute("height", 0);
+        }};
+        const selectNodesInBox = (box) => {{
+          clearGroupSelection();
+          document.querySelectorAll(".kg-node").forEach((node) => {{
+            const position = nodePositions[node.dataset.nodeId];
+            if (!position) return;
+            if (
+              position.x >= box.x &&
+              position.x <= box.x + box.width &&
+              position.y >= box.y &&
+              position.y <= box.y + box.height
+            ) {{
+              node.classList.add("group-selected");
+            }}
+          }});
+        }};
+        svg.addEventListener("pointerdown", (event) => {{
+          if (event.target === svg) {{
+            clearGroupSelection();
+            const start = svgPoint(event);
+            activeSelection = {{ start, current: start, moved: false }};
+            svg.setPointerCapture(event.pointerId);
+            setSelectionBox(start, start);
+          }}
+        }});
+        svg.addEventListener("pointermove", (event) => {{
+          if (!activeSelection) return;
+          event.preventDefault();
+          const current = svgPoint(event);
+          activeSelection.current = current;
+          const box = setSelectionBox(activeSelection.start, current);
+          activeSelection.moved = box.width > 4 || box.height > 4;
+        }});
+        svg.addEventListener("pointerup", (event) => {{
+          if (!activeSelection) return;
+          const box = setSelectionBox(activeSelection.start, activeSelection.current);
+          if (activeSelection.moved) {{
+            selectNodesInBox(box);
+          }} else {{
+            clearGroupSelection();
+          }}
+          hideSelectionBox();
+          try {{
+            svg.releasePointerCapture(event.pointerId);
+          }} catch (error) {{}}
+          activeSelection = null;
+        }});
+        svg.addEventListener("pointercancel", () => {{
+          hideSelectionBox();
+          activeSelection = null;
+        }});
         document.querySelectorAll(".kg-node").forEach((node) => {{
           node.addEventListener("pointerdown", (event) => {{
             event.preventDefault();
             event.stopPropagation();
             const nodeId = node.dataset.nodeId;
+            if (!node.classList.contains("group-selected")) {{
+              selectNode(node);
+            }}
             const start = svgPoint(event);
             const current = nodePositions[nodeId];
             if (!current) return;
+            const dragTargets = selectedNodeElements()
+              .map((element) => {{
+                const id = element.dataset.nodeId;
+                const position = nodePositions[id];
+                return position ? {{ element, id, startX: position.x, startY: position.y }} : null;
+              }})
+              .filter(Boolean);
             activeNode = {{
               element: node,
               nodeId,
-              offsetX: current.x - start.x,
-              offsetY: current.y - start.y,
+              startX: start.x,
+              startY: start.y,
+              targets: dragTargets,
+              moved: false,
             }};
-            node.classList.add("dragging");
+            dragTargets.forEach((target) => target.element.classList.add("dragging"));
             node.setPointerCapture(event.pointerId);
           }});
           node.addEventListener("pointermove", (event) => {{
             if (!activeNode || activeNode.element !== node) return;
             event.preventDefault();
             const point = svgPoint(event);
-            const next = {{
-              x: clamp(point.x + activeNode.offsetX, 22, 898),
-              y: clamp(point.y + activeNode.offsetY, 22, 658),
-            }};
-            nodePositions[activeNode.nodeId] = next;
-            node.setAttribute("transform", `translate(${{next.x}} ${{next.y}})`);
-            updateConnectedEdges(activeNode.nodeId);
+            const dx = point.x - activeNode.startX;
+            const dy = point.y - activeNode.startY;
+            activeNode.moved = activeNode.moved || Math.abs(dx) > 2 || Math.abs(dy) > 2;
+            activeNode.targets.forEach((target) => {{
+              const next = {{
+                x: clamp(target.startX + dx, 22, 898),
+                y: clamp(target.startY + dy, 22, 658),
+              }};
+              nodePositions[target.id] = next;
+              target.element.setAttribute("transform", `translate(${{next.x}} ${{next.y}})`);
+              updateConnectedEdges(target.id);
+            }});
             scheduleSave();
           }});
           const clearDrag = (event) => {{
             if (!activeNode || activeNode.element !== node) return;
-            node.classList.remove("dragging");
+            activeNode.targets.forEach((target) => target.element.classList.remove("dragging"));
             try {{
               node.releasePointerCapture(event.pointerId);
             }} catch (error) {{}}

@@ -12,6 +12,10 @@ services:
       MLFLOW_TRACKING_ENABLED: "true"
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_EXPERIMENT_NAME: project2-agentic-document-ai
+      NEO4J_ENABLED: "true"
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: safetygraph
     ports:
       - "8000:8000"
     volumes:
@@ -22,6 +26,8 @@ services:
         condition: service_healthy
       mlflow:
         condition: service_started
+      neo4j:
+        condition: service_healthy
 
   mlflow:
     image: python:3.11-slim
@@ -34,6 +40,23 @@ services:
       - "5000:5000"
     volumes:
       - mlflow_data:/mlflow
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/safetygraph
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p safetygraph 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   postgres:
     image: postgres:16-alpine
@@ -53,3 +76,5 @@ services:
 volumes:
   postgres_data:
   mlflow_data:
+  neo4j_data:
+  neo4j_logs:

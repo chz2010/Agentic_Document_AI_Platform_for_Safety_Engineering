@@ -147,6 +147,47 @@ flowchart TD
     class EXP,PARAMS,METRICS,ARTIFACTS,COMPARE mlops;
 ```
 
+## Neo4j Traceability Graph Flow
+
+```mermaid
+flowchart TD
+    APP[Project 2 Backend] --> KG[In-App Knowledge Graph Builder]
+    KG --> NODES[Graph Nodes<br/>Project, Document, Requirement, Hazard, Safety Goal, Test Case, Evidence, Agent Run]
+    KG --> EDGES[Graph Edges<br/>CONTAINS, LINKED_HAZARD, LINKED_SAFETY_GOAL, VERIFIED_BY, SUPPORTED_BY]
+
+    NODES --> SYNC[Neo4j Sync API]
+    EDGES --> SYNC
+    SYNC --> NEO[(Neo4j Graph Database)]
+
+    subgraph CypherQueries["Cypher Traceability Queries"]
+        Q1[Requirements missing test cases]
+        Q2[Requirements missing hazards]
+        Q3[Requirements missing safety goals]
+        Q4[Evidence chain for a requirement]
+    end
+
+    NEO --> Q1
+    NEO --> Q2
+    NEO --> Q3
+    NEO --> Q4
+    Q1 --> REVIEW[Human Review Queue]
+    Q2 --> REVIEW
+    Q3 --> REVIEW
+    Q4 --> SAFETYCASE[Safety Case Evidence Review]
+
+    classDef graph fill:#ecfdf5,stroke:#10b981,color:#0f172a;
+    classDef query fill:#fff7ed,stroke:#f97316,color:#0f172a;
+    classDef db fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
+    class KG,NODES,EDGES,SYNC graph;
+    class Q1,Q2,Q3,Q4 query;
+    class NEO db;
+```
+
+Neo4j is used as an optional graph database layer for Cypher-based
+traceability analysis. RDF/SPARQL is intentionally left as a future semantic
+web extension; Project 2 uses Neo4j/Cypher because it maps naturally to
+engineering traceability and is easier to demo.
+
 ## Database Diagram
 
 ```mermaid
@@ -417,6 +458,8 @@ Project 2 REST APIs:
   cost, hallucination flags, and quality scores
 - Optional MLflow tracking server for requirement extraction, RAG query,
   requirement evaluation, and AgentOps runs
+- Optional Neo4j graph database sync with Cypher queries for missing test
+  cases, missing hazard links, missing safety-goal links, and evidence chains
 - PostgreSQL + Chroma architecture
 - Docker Compose deployment
 
@@ -519,6 +562,7 @@ POST /models/select
 GET  /agent-versions
 GET  /metrics
 GET  /mlflow/status
+GET  /neo4j/status
 GET  /health
 GET  /domain-profiles
 POST /projects
@@ -540,6 +584,8 @@ GET  /projects/{project_id}/traceability
 GET  /projects/{project_id}/knowledge-graph
 GET  /projects/{project_id}/knowledge-graph/layout
 PUT  /projects/{project_id}/knowledge-graph/layout
+POST /projects/{project_id}/neo4j/sync
+GET  /projects/{project_id}/neo4j/query
 GET  /projects/{project_id}/benchmark/evaluate
 POST /projects/{project_id}/test-cases/generate
 GET  /projects/{project_id}/evaluation-runs
@@ -672,12 +718,29 @@ Tracking URI in Docker: http://mlflow:5000
 Local file tracking fallback: ./mlruns
 ```
 
+Neo4j is also included in Docker Compose for graph database traceability:
+
+```text
+Neo4j Browser: http://127.0.0.1:7474
+Bolt URI in Docker: bolt://neo4j:7687
+Default login: neo4j / safetygraph
+```
+
 For a non-Docker run, enable MLflow with:
 
 ```bash
 export MLFLOW_TRACKING_ENABLED=true
 export MLFLOW_TRACKING_URI=./mlruns
 export MLFLOW_EXPERIMENT_NAME=project2-agentic-document-ai
+```
+
+For a non-Docker Neo4j run, enable graph sync with:
+
+```bash
+export NEO4J_ENABLED=true
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USERNAME=neo4j
+export NEO4J_PASSWORD=safetygraph
 ```
 
 ## Example Query Request

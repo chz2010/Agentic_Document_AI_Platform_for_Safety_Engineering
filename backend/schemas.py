@@ -240,6 +240,31 @@ class KnowledgeGraphLayout(BaseModel):
     positions: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
+class Neo4jStatus(BaseModel):
+    enabled: bool
+    available: bool
+    uri: str
+    database: str = "neo4j"
+    status: str
+    message: str
+
+
+class Neo4jSyncResponse(BaseModel):
+    project_id: int
+    synced: bool
+    nodes: int = 0
+    edges: int = 0
+    message: str
+
+
+class Neo4jQueryResponse(BaseModel):
+    project_id: int
+    query_type: str
+    cypher: str
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int = 0
+
+
 class TestCase(BaseModel):
     id: str
     scenario: str
