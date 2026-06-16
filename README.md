@@ -17,25 +17,37 @@ project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
 history, tool orchestration, agent run monitoring, approval gates, and Docker
 Compose.
 
-## Project Roadmap
+## Project Milestone Roadmap
 
 ```mermaid
 flowchart LR
-    A["Completed<br/>FastAPI backend<br/>Project workspaces<br/>Document upload and chunking<br/>Project-specific RAG<br/>Requirements extraction and scoring<br/>Traceability and knowledge graph<br/>AgentOps, auth, memory, model registry, metrics<br/>Conversation-to-action workflow"]
-    B["Current Focus<br/>Validate LiDAR and railway examples<br/>Improve demo dataset quality<br/>Polish Streamlit analyst dashboard<br/>Prepare recruiter demo workflow<br/>Document MCP integration with Project 1"]
-    C["Next Steps<br/>Connect Project 2 to Project 1 MCP service<br/>Clause-aware reference mapping<br/>Better benchmark datasets<br/>Report export polish"]
-    D["Longer-Term<br/>Multi-user roles<br/>Background ingestion jobs<br/>Deployment hardening<br/>Project 3: multi-agent ISO 26262 co-pilot"]
+    M1["M1 Completed Platform"]
+    M2["M2 Current Polish"]
+    M3["M3 Next Integration"]
+    M4["M4 Production Extensions"]
 
-    A --> B --> C --> D
+    M1 --> M2 --> M3 --> M4
 
-    classDef done fill:#ecfdf5,stroke:#10b981,color:#0f172a;
-    classDef current fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
-    classDef next fill:#fff7ed,stroke:#f97316,color:#0f172a;
-    classDef later fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
-    class A done;
-    class B current;
-    class C next;
-    class D later;
+    M1D["FastAPI, Streamlit, workspaces, document upload, RAG, requirements, traceability, AgentOps, MLflow, Neo4j"]
+    M2D["LiDAR examples, railway examples, demo cleanup, Streamlit UX polish, recruiter demo workflow"]
+    M3D["Project 1 MCP connection, clause-aware references, stronger benchmark datasets, report export polish"]
+    M4D["Multi-user roles, background ingestion jobs, deployment hardening, Project 3 safety co-pilot"]
+
+    M1 -.-> M1D
+    M2 -.-> M2D
+    M3 -.-> M3D
+    M4 -.-> M4D
+
+    classDef milestoneDone fill:#ecfdf5,stroke:#10b981,color:#0f172a;
+    classDef milestoneCurrent fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
+    classDef milestoneNext fill:#fff7ed,stroke:#f97316,color:#0f172a;
+    classDef milestoneLater fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
+    classDef milestoneDetail fill:#f8fafc,stroke:#94a3b8,color:#0f172a;
+    class M1 milestoneDone;
+    class M2 milestoneCurrent;
+    class M3 milestoneNext;
+    class M4 milestoneLater;
+    class M1D,M2D,M3D,M4D milestoneDetail;
 ```
 
 ## System Architecture
@@ -118,11 +130,11 @@ flowchart TD
     end
 
     subgraph MLflow["MLflow Experiment Tracking"]
-        EXP[Experiment<br/>project2-agentic-document-ai]
-        PARAMS[Params<br/>model, prompt version, tool config]
-        METRICS[Metrics<br/>quality, latency, cost, tokens, coverage]
-        ARTIFACTS[Artifacts<br/>run payloads, summaries, evidence metadata]
-        COMPARE[Compare Runs<br/>model behavior and prompt changes]
+        EXP[MLflow Experiment: project2-agentic-document-ai]
+        PARAMS[Params: model, prompt version, tool config]
+        METRICS[Metrics: quality, latency, cost, tokens, coverage]
+        ARTIFACTS[Artifacts: run payloads, summaries, evidence metadata]
+        COMPARE[Compare Runs: model behavior and prompt changes]
     end
 
     RAG -->|evaluation run| EXP
@@ -136,7 +148,7 @@ flowchart TD
     METRICS --> COMPARE
     ARTIFACTS --> COMPARE
 
-    COMPARE --> DECIDE[Engineering Decision<br/>keep, tune, rollback, or escalate]
+    COMPARE --> DECIDE[Engineering Decision: keep, tune, rollback, or escalate]
     DECIDE --> UI
 
     classDef product fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
@@ -152,8 +164,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     APP[Project 2 Backend] --> KG[In-App Knowledge Graph Builder]
-    KG --> NODES[Graph Nodes<br/>Project, Document, Requirement, Hazard, Safety Goal, Test Case, Evidence, Agent Run]
-    KG --> EDGES[Graph Edges<br/>CONTAINS, LINKED_HAZARD, LINKED_SAFETY_GOAL, VERIFIED_BY, SUPPORTED_BY]
+    KG --> NODES[Graph Nodes: Project, Document, Requirement, Hazard, Safety Goal, Test Case, Evidence, Agent Run]
+    KG --> EDGES[Graph Edges: CONTAINS, LINKED_HAZARD, LINKED_SAFETY_GOAL, VERIFIED_BY, SUPPORTED_BY]
 
     NODES --> SYNC[Neo4j Sync API]
     EDGES --> SYNC
@@ -263,15 +275,15 @@ flowchart TD
     I --> J[AgentOps Dashboard APIs]
     J --> K[Metrics and Health APIs]
 
-    B --> B1["POST /auth/login<br/>POST /auth/refresh<br/>GET /users/me"]
-    C --> C1["POST /projects<br/>GET /projects<br/>DELETE /projects/{id}"]
-    D --> D1["POST /documents<br/>GET /documents<br/>GET /documents/{id}/chunks"]
-    E --> E1["POST /query<br/>POST /retrieval/search<br/>POST /analysis/precision-review"]
-    F --> F1["POST /requirements/extract<br/>POST /requirements/generate<br/>POST /requirements/evaluate"]
-    G --> G1["GET /traceability<br/>POST /test-cases/generate<br/>GET /knowledge-graph"]
-    L --> L1["POST /conversations<br/>POST /messages<br/>POST /intent-detect<br/>POST /actions"]
-    J --> J1["POST /agent-runs<br/>GET /agent-runs<br/>PATCH /approval"]
-    K --> K1["GET /health<br/>GET /metrics<br/>GET /models"]
+    B --> B1["Auth: login, refresh, current user"]
+    C --> C1["Projects: create, list, get, delete"]
+    D --> D1["Documents: upload, list, inspect chunks"]
+    E --> E1["Retrieval: query, search, precision review"]
+    F --> F1["Requirements: extract, generate, evaluate"]
+    G --> G1["Traceability: matrix, tests, knowledge graph"]
+    L --> L1["Conversation workflow: messages, intent, actions"]
+    J --> J1["AgentOps: create runs, list runs, approve"]
+    K --> K1["Operations: health, metrics, models"]
 ```
 
 ## Agent Flow Diagram
