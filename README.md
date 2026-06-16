@@ -21,17 +21,17 @@ Compose.
 
 ```mermaid
 flowchart LR
-    M1["M1 Completed Platform"]
-    M2["M2 Current Polish"]
-    M3["M3 Next Integration"]
-    M4["M4 Production Extensions"]
+    M1["M1 Project 2 Platform"]
+    M2["M2 Safety Engineering Demo"]
+    M3["M3 Project 3 Perception Copilot"]
+    M4["M4 Portfolio Integration"]
 
     M1 --> M2 --> M3 --> M4
 
     M1D["FastAPI, Streamlit, workspaces, document upload, RAG, requirements, traceability, AgentOps, MLflow, Neo4j"]
-    M2D["LiDAR examples, railway examples, demo cleanup, Streamlit UX polish, recruiter demo workflow"]
-    M3D["Project 1 MCP connection, clause-aware references, stronger benchmark datasets, report export polish"]
-    M4D["Multi-user roles, background ingestion jobs, deployment hardening, Project 3 safety co-pilot"]
+    M2D["Seed demo, LiDAR and railway examples, requirement scoring, test generation, knowledge graph, cleanup tools"]
+    M3D["Perception Safety Evaluation Copilot: YOLO image detection, missed objects, false positives, low confidence, safety report"]
+    M4D["Project 1 standards context, Project 2 requirements and traceability, Project 3 perception evidence and metrics"]
 
     M1 -.-> M1D
     M2 -.-> M2D
@@ -39,14 +39,14 @@ flowchart LR
     M4 -.-> M4D
 
     classDef milestoneDone fill:#ecfdf5,stroke:#10b981,color:#0f172a;
-    classDef milestoneCurrent fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
-    classDef milestoneNext fill:#fff7ed,stroke:#f97316,color:#0f172a;
-    classDef milestoneLater fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
+    classDef milestoneStable fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
+    classDef milestoneFocus fill:#fff7ed,stroke:#f97316,color:#0f172a;
+    classDef milestoneFuture fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
     classDef milestoneDetail fill:#f8fafc,stroke:#94a3b8,color:#0f172a;
     class M1 milestoneDone;
-    class M2 milestoneCurrent;
-    class M3 milestoneNext;
-    class M4 milestoneLater;
+    class M2 milestoneStable;
+    class M3 milestoneFocus;
+    class M4 milestoneFuture;
     class M1D,M2D,M3D,M4D milestoneDetail;
 ```
 
@@ -379,8 +379,8 @@ flowchart TD
 Project 2 is designed to consume external safety knowledge services. Project 1
 already exposes a read-only MCP server for standards, document, and video
 evidence retrieval. Project 2 does not currently run its own MCP server; the
-intended integration is for Project 2 or a future Project 3 co-pilot to call
-Project 1 as an MCP-based knowledge service.
+intended integration is for Project 2 and the Perception Safety Evaluation
+Copilot to use Project 1 as an MCP-based safety knowledge service.
 
 ```mermaid
 flowchart LR
@@ -404,14 +404,21 @@ flowchart LR
         TRACE --> OPS
     end
 
-    subgraph P3["Project 3: Future Safety Co-Pilot"]
-        AGENT[Multi-Agent Functional Safety Assistant]
+    subgraph P3["Project 3: Perception Safety Evaluation Copilot"]
+        IMG[Driving Image Upload]
+        DET[YOLO Object Detection]
+        FAIL[Perception Failure Analysis]
+        REPORT[Safety-Focused Report]
+        IMG --> DET
+        DET --> FAIL
+        FAIL --> REPORT
     end
 
     MCP -->|standards and evidence context| RAG
     MCP -->|clause / video evidence| REQ
-    P2 -->|workflow and traceability tools| AGENT
-    MCP -->|domain knowledge tools| AGENT
+    MCP -->|SOTIF and safety context| REPORT
+    P2 -->|requirements and test cases| FAIL
+    REPORT -->|perception evidence and metrics| OPS
 ```
 
 Planned MCP tool usage:
