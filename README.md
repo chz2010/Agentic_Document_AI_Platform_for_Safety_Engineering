@@ -6,16 +6,22 @@ analysis, traceability, and production-grade agent operations.
 This project turns safety engineering documents into an agentic backend
 platform with FastAPI, project workspaces, PDF upload, project-specific RAG,
 structured Pydantic outputs, PostgreSQL, requirements engineering,
-traceability, evaluation history, agent operations logging, tool orchestration,
-mock external integrations, and Docker Compose.
+traceability, evaluation history, agent operations logging, internal workflow
+tooling, mock external integrations, and Docker Compose.
+
+The current Streamlit demo is designed as a recruiter-friendly MVP: users
+select a project, upload or replace project documents, ask evidence-grounded
+questions, extract and score requirements, build traceability/test outputs, and
+monitor AI workflow behavior in AgentOps. GitHub, Jira, and Slack integrations
+are mock/local workflow records in this prototype, not live external API calls.
 
 ## Portfolio Description
 
-Productionized the concept into an Agentic Document AI + Requirements
-Engineering platform with FastAPI, project workspaces, PDF upload,
-project-specific RAG, Pydantic outputs, PostgreSQL, traceability, evaluation
-history, tool orchestration, agent run monitoring, approval gates, and Docker
-Compose.
+Built an Agentic Document AI + Requirements Engineering MVP with FastAPI,
+Streamlit, project workspaces, document upload, project-specific RAG, optional
+Project 1 MCP standards enrichment, Pydantic outputs, traceability, evaluation
+history, AgentOps monitoring, approval metadata, optional MLflow/Neo4j, and
+Docker Compose.
 
 ## Project Milestone Roadmap
 
@@ -110,11 +116,12 @@ flowchart TD
     subgraph ProductFlow["Project 2 Product Workflow"]
         API --> DOC[Document Upload and Chunking]
         DOC --> RAG[Project-Specific RAG Query]
+        RAG --> MCPRAG[Optional Project 1 MCP Standards Enrichment]
         DOC --> REQ[Requirement Extraction]
         REQ --> SCORE[Requirement Quality Scoring]
         SCORE --> TRACE[Traceability Matrix]
         TRACE --> TEST[Test Case Generation]
-        API --> OPS[AgentOps Tool Orchestration]
+        API --> OPS[AgentOps Monitoring]
     end
 
     subgraph AppStore["Application Persistence"]
@@ -126,6 +133,7 @@ flowchart TD
         SCORE --> DB
         TRACE --> DB
         TEST --> DB
+        MCPRAG --> DB
         OPS --> DB
     end
 
@@ -138,6 +146,7 @@ flowchart TD
     end
 
     RAG -->|evaluation run| EXP
+    MCPRAG -->|standards evidence metadata| EXP
     REQ -->|extraction run| EXP
     SCORE -->|quality evaluation run| EXP
     OPS -->|agent run| EXP
@@ -154,7 +163,7 @@ flowchart TD
     classDef product fill:#eff6ff,stroke:#3b82f6,color:#0f172a;
     classDef store fill:#ecfdf5,stroke:#10b981,color:#0f172a;
     classDef mlops fill:#f5f3ff,stroke:#8b5cf6,color:#0f172a;
-    class DOC,RAG,REQ,SCORE,TRACE,TEST,OPS product;
+    class DOC,RAG,MCPRAG,REQ,SCORE,TRACE,TEST,OPS product;
     class DB,VDB store;
     class EXP,PARAMS,METRICS,ARTIFACTS,COMPARE mlops;
 ```
@@ -269,7 +278,7 @@ flowchart TD
     E --> F[Requirements APIs]
     F --> G[Traceability and Test Case APIs]
     G --> H[Report APIs]
-    E --> I[Agent Tool APIs]
+    E --> I[Internal Agent Tool APIs]
     E --> L[Conversation-To-Action APIs]
     L --> J
     I --> J[AgentOps Dashboard APIs]
@@ -282,7 +291,7 @@ flowchart TD
     F --> F1["Requirements: extract, generate, evaluate"]
     G --> G1["Traceability: matrix, tests, knowledge graph"]
     L --> L1["Conversation workflow: messages, intent, actions"]
-    J --> J1["AgentOps: create runs, list runs, approve"]
+    J --> J1["AgentOps: monitor runs, list runs, approve/review"]
     K --> K1["Operations: health, metrics, models"]
 ```
 
@@ -290,28 +299,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[User Request] --> B[Create Agent Run]
-    B --> C[Select Model and Prompt Version]
-    C --> D[Run Tool Orchestration]
-
-    subgraph Tools["Available Agent Tools"]
-        D --> T1[search_project_docs]
-        D --> T2[extract_requirements]
-        D --> T3[evaluate_requirements]
-        D --> T4[generate_traceability]
-        D --> T5[generate_test_cases]
-        D --> T6[create_issue_ticket]
-    end
-
-    T1 --> E[Compose Evidence]
-    T2 --> E
-    T3 --> E
-    T4 --> E
-    T5 --> E
-    T6 --> E
-
-    E --> F[Generate Structured Output]
-    F --> G[Evaluate Confidence and Hallucination Risk]
+    A[User Workflow: RAG / Requirements / MCP / Tests] --> B[Create Agent Run Log]
+    B --> C[Record Model, Prompt Version, Tools, Evidence]
+    C --> D[Store Latency, Tokens, Cost Estimate, Quality Score]
+    D --> G[Evaluate Confidence and Hallucination Risk]
     G --> H{Approval Gate}
     H -->|Pass| I[Resolved Output]
     H -->|Needs Review| J[Human Escalation]
@@ -363,6 +354,7 @@ flowchart TD
     H --> I[Multi-Source Retrieval]
     E --> I
     F --> I
+    MCP[Optional Project 1 MCP Standards DB] --> I
     J[Requirements Table] --> I
     K[Traceability Matrix] --> I
     L[Evaluation and Agent Run Logs] --> I
@@ -378,9 +370,8 @@ flowchart TD
 
 Project 2 is designed to consume external safety knowledge services. Project 1
 already exposes a read-only MCP server for standards, document, and video
-evidence retrieval. Project 2 does not currently run its own MCP server; the
-intended integration is for Project 2 and the Perception Safety Evaluation
-Copilot to use Project 1 as an MCP-based safety knowledge service.
+evidence retrieval. Project 2 consumes Project 1 through MCP `stdio` as an
+external safety knowledge service.
 
 ```mermaid
 flowchart LR
@@ -421,16 +412,19 @@ flowchart LR
     REPORT -->|perception evidence and metrics| OPS
 ```
 
-Planned MCP tool usage:
+Live MCP tool usage:
 
 ```text
 Project 1 MCP:
+  get_knowledge_base_status
   search_safety_standards
   search_video_evidence
   search_combined_safety_context
 
 Project 2 REST APIs:
+  Ask/RAG query with optional Project 1 standards enrichment
   requirements extraction
+  standards-backed requirement generation
   requirement evaluation
   traceability generation
   workflow item creation
@@ -454,6 +448,20 @@ uses the configured LLM to generate project-specific missing requirement
 candidates with clause/page evidence references. If Project 1 or the LLM is
 unavailable, the endpoint safely falls back to the existing offline templates.
 
+`POST /projects/{project_id}/query` can also enrich Ask/RAG answers with
+Project 1 standards evidence when `use_project1_mcp=true`. The final answer can
+therefore combine uploaded Project 2 document chunks with Project 1 standards
+chunks. Retrieved sources expose `source_type` values such as:
+
+```text
+project_document
+project1_mcp_standard
+```
+
+The Streamlit Ask/RAG page includes a checkbox named **Enrich answer with
+Project 1 standards MCP**. If Project 1 MCP is unavailable, the app falls back
+to uploaded project documents only.
+
 Default sibling-project configuration:
 
 ```text
@@ -468,6 +476,7 @@ PROJECT1_MCP_SERVER=mcp_server.py
 - FastAPI backend engineering
 - API design for project workspaces and document upload
 - Project-specific RAG over uploaded safety documents
+- Optional Ask/RAG enrichment with Project 1 MCP standards evidence
 - Domain profiles for automotive, railway, and generic safety engineering
 - Structured Pydantic outputs for safety analysis and requirements engineering
 - Requirement extraction, classification, and quality scoring
@@ -479,14 +488,13 @@ PROJECT1_MCP_SERVER=mcp_server.py
   coverage, evidence coverage, test coverage, and agent reliability
 - Evaluation run history and optional MLflow experiment tracking for
   MLOps-style monitoring
-- Agent operations module with run logs, cost tracking, failure reasons,
+- AgentOps monitoring module with run logs, cost tracking, failure reasons,
   human escalation flags, approval gates, evaluation scores, and prompt/version
   tracking
-- Tool orchestration layer for `search_project_docs`, `extract_requirements`,
-  `evaluate_requirements`, `generate_traceability`, `generate_test_cases`, and
-  `create_issue_ticket`
-- MCP integration concept for consuming Project 1 as an external standards and
-  video-evidence knowledge service
+- Internal tool orchestration API remains available for development/testing,
+  while the Streamlit AgentOps page is read-only and recruiter-friendly
+- Live MCP integration for consuming Project 1 as an external standards and
+  evidence knowledge service
 - Multi-source retrieval across project documents, requirements, traceability,
   test cases, evaluation history, and agent run logs
 - Precision review module with reranked evidence, confidence scoring, candidate
@@ -497,8 +505,9 @@ PROJECT1_MCP_SERVER=mcp_server.py
 - Conversation-to-action workflow that detects user intent from project
   conversations and converts review discussions into workflow items and
   auditable agent runs
-- Mock integrations for GitHub issues, Jira-style tickets, CRM-like updates,
-  and Slack-style notifications
+- Mock/local integrations for GitHub issues, Jira-style tickets, CRM-like
+  updates, and Slack-style notifications. These demonstrate workflow intent but
+  do not send live external API calls in the prototype.
 - Evaluation dashboard metrics for success rate, escalation rate, latency,
   cost, hallucination flags, and quality scores
 - Optional MLflow tracking server for requirement extraction, RAG query,
@@ -510,10 +519,18 @@ PROJECT1_MCP_SERVER=mcp_server.py
 
 ## Core Workflow
 
-Create project -> Upload documents -> Extract and chunk text -> Store
-project-filtered embeddings -> Ask safety or requirements questions -> Generate
-structured analysis -> Extract and evaluate requirements -> Build traceability
-matrix and knowledge graph -> Generate test cases -> Export reports.
+Create project -> Upload or replace documents -> Extract and chunk text -> Store
+project-filtered embeddings -> Ask safety or requirements questions with
+optional Project 1 MCP standards evidence -> Generate structured analysis ->
+Extract and evaluate requirements -> Build traceability matrix and knowledge
+graph -> Generate test cases -> Monitor workflow behavior in AgentOps -> Export
+reports.
+
+For clean testing or recruiter demos, the Documents page includes **Replace
+existing project documents before upload**. When enabled, the backend removes
+old document rows, chunks, uploaded files, and vector-store entries for the
+selected project before indexing the new upload. When disabled, uploads are
+additive and retrieval searches all documents inside the selected project.
 
 ## Architecture Decks
 
@@ -579,6 +596,42 @@ python scripts/convert_requirements_xml.py download_dataset --output-dir convert
 The raw `download_dataset/` folder is intentionally not required for the app.
 Use the converted Markdown files for upload demos.
 
+## Recommended Recruiter Demo Flow
+
+For a short non-technical demo, use:
+
+```text
+datasets/seed_requirements/automotive_safety_requirements.md
+```
+
+Suggested flow:
+
+1. Create or select a clean project.
+2. Open **Documents** and upload the Markdown file. If reusing a project, enable
+   **Replace existing project documents before upload**.
+3. Open **Ask / RAG** and ask:
+
+   ```text
+   Are the requirements complete for occluded pedestrian detection at night?
+   ```
+
+4. Show the answer, missing/weak evidence, and retrieved sources. If Project 1
+   MCP is connected, show that evidence can come from both `project_document`
+   and `project1_mcp_standard`.
+5. Open **Requirements** and extract/evaluate requirements.
+6. Open **Traceability** and show how hazards, safety goals, requirements, and
+   tests connect.
+7. Open **AgentOps** and explain that it monitors workflow reliability, cost,
+   latency, quality score, hallucination risk, and human review state.
+
+Recommended framing:
+
+```text
+This is a working MVP, not a certified safety tool. It demonstrates how
+document-based business processes can be automated with AI while keeping
+evidence, review, monitoring, and human-in-the-loop controls visible.
+```
+
 ## Railway Safety Demo Framing
 
 This project can be tailored to railway workflows when licensed railway
@@ -608,6 +661,8 @@ GET  /agent-versions
 GET  /metrics
 GET  /mlflow/status
 GET  /neo4j/status
+GET  /mcp/project1/status
+POST /mcp/project1/search
 GET  /health
 GET  /domain-profiles
 POST /projects
@@ -615,6 +670,7 @@ GET  /projects
 GET  /projects/{project_id}
 DELETE /projects/{project_id}
 POST /projects/{project_id}/documents
+POST /projects/{project_id}/documents?replace_existing=true
 GET  /projects/{project_id}/documents
 GET  /projects/{project_id}/documents/{document_id}/chunks
 POST /projects/{project_id}/query
@@ -739,6 +795,8 @@ In the **Ask** tab, users can choose the answer engine and model per run:
 - OpenAI model, for example `gpt-4o-mini`
 - local Ollama-compatible model, for example `qwen2.5:7b-instruct`
 - deterministic evidence synthesis, which uses no LLM
+- optional Project 1 MCP standards enrichment when the sibling Project 1 MCP
+  server is available
 
 ## Run With Docker Compose
 
@@ -796,7 +854,9 @@ export NEO4J_PASSWORD=safetygraph
   "standards": ["ISO 26262", "ISO 21448", "ISO 8800"],
   "include_requirements_review": true,
   "answer_mode": "openai",
-  "answer_model": "gpt-4o-mini"
+  "answer_model": "gpt-4o-mini",
+  "use_project1_mcp": true,
+  "project1_mcp_results_per_standard": 2
 }
 ```
 
