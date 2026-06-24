@@ -191,11 +191,20 @@ class Requirement(BaseModel):
 class RequirementExtractionResponse(BaseModel):
     requirements: list[Requirement]
     quality_summary: dict[str, Any] = Field(default_factory=dict)
+    generation_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RequirementGenerateFromStandardsRequest(BaseModel):
     standards: list[str] = Field(default_factory=lambda: ["ISO 26262", "ISO 21448", "ISO 8800"])
     replace_existing: bool = False
+    use_project1_mcp: bool = True
+    max_dynamic_requirements: int = Field(default=8, ge=1, le=20)
+
+
+class Project1McpSearchRequest(BaseModel):
+    query: str
+    standards: list[str] = Field(default_factory=lambda: ["ISO 26262", "ISO 21448", "ISO 8800"])
+    k_per_standard: int = Field(default=4, ge=1, le=10)
 
 
 class TraceabilityLink(BaseModel):
@@ -291,6 +300,8 @@ class QueryRequest(BaseModel):
     include_requirements_review: bool = False
     answer_mode: str | None = Field(default=None, description="Optional per-run answer mode: openai, local, or none.")
     answer_model: str | None = Field(default=None, description="Optional per-run model name for OpenAI or local model engines.")
+    use_project1_mcp: bool = Field(default=False, description="Include standards evidence from Project 1 MCP when available.")
+    project1_mcp_results_per_standard: int = Field(default=2, ge=1, le=5)
 
 
 class QueryResponse(BaseModel):
@@ -301,6 +312,7 @@ class QueryResponse(BaseModel):
     evaluation_run_id: int | None = None
     answer_mode: str | None = None
     answer_model: str | None = None
+    retrieval_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RetrievalSearchRequest(BaseModel):

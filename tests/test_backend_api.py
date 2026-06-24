@@ -150,14 +150,14 @@ def test_upload_extract_query_and_traceability_csv():
         runs = client.get(f"/projects/{project['id']}/agent-runs")
         assert runs.status_code == 200
         assert runs.json()[0]["operation_name"] == "project_query"
-        assert runs.json()[0]["source_system"] == "autonomous_driving_safety_analyst"
+        assert runs.json()[0]["source_system"] == "agentic_document_ai_platform"
         assert runs.json()[0]["model_used"] == "deterministic-evidence-synthesis"
         assert runs.json()[0]["token_usage"]["completion_tokens"] > 0
         assert runs.json()[0]["prompt_version"] == "query-answer-v1"
         assert runs.json()[0]["evaluation_score"] is not None
 
         source_dashboard = client.get(
-            f"/projects/{project['id']}/agent-operations/dashboard?source_system=autonomous_driving_safety_analyst"
+            f"/projects/{project['id']}/agent-operations/dashboard?source_system=agentic_document_ai_platform"
         )
         assert source_dashboard.status_code == 200
         assert source_dashboard.json()["total_output_tokens"] > 0
@@ -165,6 +165,44 @@ def test_upload_extract_query_and_traceability_csv():
         csv_response = client.get(f"/projects/{project['id']}/traceability?format=csv")
         assert csv_response.status_code == 200
         assert "hazard_id,hazard_description,safety_goal_id,requirement_id" in csv_response.text
+
+
+def test_replace_existing_document_removes_old_project_retrieval_chunks():
+    with TestClient(app) as client:
+        project = client.post(
+            "/projects",
+            json={"name": "Replace Document Retrieval", "domain": "ADAS", "system_type": "LiDAR"},
+        ).json()
+
+        first_upload = client.post(
+            f"/projects/{project['id']}/documents",
+            files={"file": ("lidar_requirements.txt", "The LiDAR system shall detect pedestrians at night.", "text/plain")},
+        )
+        assert first_upload.status_code == 200
+        first_search = client.post(
+            f"/projects/{project['id']}/retrieval/search",
+            json={"query": "LiDAR pedestrians night", "tools": ["project_docs"], "top_k": 5},
+        )
+        assert first_search.status_code == 200
+        assert any("LiDAR" in row["snippet"] for row in first_search.json()["results_by_tool"]["project_docs"])
+
+        replacement_upload = client.post(
+            f"/projects/{project['id']}/documents?replace_existing=true",
+            files={"file": ("invoice_policy.txt", "Invoices shall be routed to finance approval within two days.", "text/plain")},
+        )
+        assert replacement_upload.status_code == 200
+
+        documents = client.get(f"/projects/{project['id']}/documents")
+        assert documents.status_code == 200
+        assert [document["filename"] for document in documents.json()] == ["invoice_policy.txt"]
+
+        old_search = client.post(
+            f"/projects/{project['id']}/retrieval/search",
+            json={"query": "LiDAR pedestrians night", "tools": ["project_docs"], "top_k": 5},
+        )
+        assert old_search.status_code == 200
+        old_results = old_search.json()["results_by_tool"]["project_docs"]
+        assert all("LiDAR" not in row["snippet"] for row in old_results)
 
 
 def test_query_can_select_local_answer_engine_without_running_local_model():

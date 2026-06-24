@@ -48,6 +48,19 @@ class BackendSettings:
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
     neo4j_password: str = os.getenv("NEO4J_PASSWORD", "safetygraph")
+    project1_mcp_enabled: bool = env_bool("PROJECT1_MCP_ENABLED", "true")
+    project1_mcp_project_dir: Path = Path(
+        project_path(os.getenv("PROJECT1_MCP_PROJECT_DIR", "../Autonomous_Driving_Safety_Analyst"))
+    )
+    project1_mcp_python: Path = Path(
+        os.getenv(
+            "PROJECT1_MCP_PYTHON",
+            str(project1_mcp_project_dir / ".venv" / "bin" / "python"),
+        )
+    ).expanduser()
+    project1_mcp_server: str = os.getenv("PROJECT1_MCP_SERVER", "mcp_server.py")
+    project1_mcp_timeout: int = int(os.getenv("PROJECT1_MCP_TIMEOUT", "90"))
+    project1_mcp_embedding_backend: str = os.getenv("PROJECT1_MCP_EMBEDDING_BACKEND", "openai")
     demo_username: str = os.getenv("DEMO_USERNAME", "demo@safetyflow.local")
     demo_password: str = os.getenv("DEMO_PASSWORD", "demo-password")
     cors_origins: list[str] = [

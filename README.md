@@ -437,6 +437,32 @@ Project 2 REST APIs:
   AgentOps monitoring
 ```
 
+## Live Project 1 MCP Integration
+
+Project 2 now connects to the Project 1 `mcp_server.py` over MCP `stdio`.
+The FastAPI backend launches the Project 1 MCP process on demand and exposes:
+
+```text
+GET  /mcp/project1/status
+POST /mcp/project1/search
+```
+
+`POST /projects/{project_id}/requirements/generate-from-standards` uses the
+Project 1 standards database by default. It retrieves relevant standards
+evidence, compares that evidence with the project's stored requirements, and
+uses the configured LLM to generate project-specific missing requirement
+candidates with clause/page evidence references. If Project 1 or the LLM is
+unavailable, the endpoint safely falls back to the existing offline templates.
+
+Default sibling-project configuration:
+
+```text
+PROJECT1_MCP_ENABLED=true
+PROJECT1_MCP_PROJECT_DIR=../Autonomous_Driving_Safety_Analyst
+PROJECT1_MCP_PYTHON=../Autonomous_Driving_Safety_Analyst/.venv/bin/python
+PROJECT1_MCP_SERVER=mcp_server.py
+```
+
 ## What This Project Shows
 
 - FastAPI backend engineering

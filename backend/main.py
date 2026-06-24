@@ -28,6 +28,12 @@ from backend.document_processing import chunk_documents, extract_documents
 from backend.knowledge_graph import build_project_knowledge_graph
 from backend.mlflow_tracking import log_evaluation_run, mlflow_status
 from backend.neo4j_graph import neo4j_status, run_neo4j_traceability_query, sync_knowledge_graph_to_neo4j
+from backend.project1_mcp import (
+    generate_grounded_requirements,
+    project1_mcp_status,
+    search_project1_standards,
+    standards_gap_query,
+)
 from backend.models import AgentMemoryRecord, AgentRunLogRecord, AuthSessionRecord, DocumentChunk, EvaluationRunRecord, IntegrationEventRecord, ModelSelectionRecord, Project, ProjectConversationMessageRecord, ProjectConversationRecord, ProjectDocument, RequirementRecord, TestCaseRecord, UserRecord, WorkflowItemRecord
 from backend.reporting import markdown_report, requirements_csv, traceability_csv
 from backend.requirements_engineering import build_traceability, extract_requirements_from_text, generate_requirements_from_standards, generate_test_cases, quality_summary
@@ -68,9 +74,11 @@ from backend.schemas import (
     ProjectRead,
     PrecisionReviewRequest,
     PrecisionReviewResponse,
+    Project1McpSearchRequest,
     QueryRequest,
     QueryResponse,
     RefreshRequest,
+    RetrievedChunk,
     RetrievalSearchRequest,
     RetrievalSearchResponse,
     Requirement,
@@ -277,6 +285,23 @@ def get_neo4j_status() -> Neo4jStatus:
     return neo4j_status()
 
 
+@app.get("/mcp/project1/status")
+def get_project1_mcp_status() -> dict[str, Any]:
+    return project1_mcp_status()
+
+
+@app.post("/mcp/project1/search")
+def search_project1_mcp(payload: Project1McpSearchRequest) -> dict[str, Any]:
+    try:
+        return search_project1_standards(
+            query=payload.query,
+            standards=payload.standards,
+            k_per_standard=payload.k_per_standard,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Project 1 MCP search failed: {exc}") from exc
+
+
 @app.post("/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
     user = _ensure_demo_user(session)
@@ -459,8 +484,15 @@ def delete_project(project_id: int, session: Session = Depends(get_session)) -> 
 
 
 @app.post("/projects/{project_id}/documents", response_model=DocumentRead)
-async def upload_document(project_id: int, file: UploadFile = File(...), session: Session = Depends(get_session)) -> ProjectDocument:
+async def upload_document(
+    project_id: int,
+    file: UploadFile = File(...),
+    replace_existing: bool = False,
+    session: Session = Depends(get_session),
+) -> ProjectDocument:
     _project_or_404(project_id, session)
+    if replace_existing:
+        _delete_project_documents(project_id, session)
     suffix = Path(file.filename or "").suffix.lower()
     project_dir = settings.uploads_dir / str(project_id)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -544,14 +576,21 @@ def list_document_chunks(project_id: int, document_id: int, session: Session = D
 def query_project(project_id: int, payload: QueryRequest, session: Session = Depends(get_session)) -> QueryResponse:
     _project_or_404(project_id, session)
     started = time.perf_counter()
-    retrieved = _retrieve_project_chunks(project_id, payload.question)
+    project_chunks = _retrieve_project_chunks(project_id, payload.question)
+    mcp_chunks, mcp_metadata = _retrieve_project1_mcp_chunks(
+        payload.question,
+        payload.standards,
+        payload.use_project1_mcp,
+        payload.project1_mcp_results_per_standard,
+    )
+    retrieved = project_chunks + mcp_chunks
     answer_mode = _configured_answer_mode(payload.answer_mode)
     answer_model = _configured_answer_model(payload.answer_mode, payload.answer_model)
     answer = _answer_from_context(payload.question, retrieved, payload.standards, payload.answer_mode, payload.answer_model)
     missing_requirements: list[str] = []
     recommended_requirements: list[Requirement] = []
     if payload.include_requirements_review:
-        missing_requirements = _missing_requirements(payload.question, retrieved)
+        missing_requirements = _missing_requirements(payload.question, project_chunks)
         recommended_requirements = extract_requirements_from_text("\n".join(missing_requirements), "generated_from_query")
 
     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -592,7 +631,11 @@ def query_project(project_id: int, payload: QueryRequest, session: Session = Dep
             user_request=payload.question,
             input_summary=payload.question,
             output_summary=answer[:500],
-            tools_used=["search_project_docs", "requirements_review"] if payload.include_requirements_review else ["search_project_docs"],
+            tools_used=(
+                ["search_project_docs"]
+                + (["search_project1_standards_mcp"] if mcp_chunks else [])
+                + (["requirements_review"] if payload.include_requirements_review else [])
+            ),
             retrieved_docs=[chunk.model_dump(mode="json") for chunk in retrieved],
             latency_ms=latency_ms,
             token_usage=token_usage,
@@ -602,8 +645,11 @@ def query_project(project_id: int, payload: QueryRequest, session: Session = Dep
             hallucination_flags=[] if retrieved else ["no_retrieved_evidence"],
             evaluation_score=run_quality_score,
             metadata={
-                "source_system": "autonomous_driving_safety_analyst",
+                "source_system": "agentic_document_ai_platform",
                 "retrieved_chunk_count": len(retrieved),
+                "project_document_chunk_count": len(project_chunks),
+                "project1_mcp_chunk_count": len(mcp_chunks),
+                "project1_mcp": mcp_metadata,
                 "include_requirements_review": payload.include_requirements_review,
                 "standards": payload.standards,
                 "answer_mode": answer_mode,
@@ -619,6 +665,11 @@ def query_project(project_id: int, payload: QueryRequest, session: Session = Dep
         evaluation_run_id=run.id,
         answer_mode=answer_mode,
         answer_model=answer_model,
+        retrieval_metadata={
+            "project_document_chunk_count": len(project_chunks),
+            "project1_mcp_chunk_count": len(mcp_chunks),
+            "project1_mcp": mcp_metadata,
+        },
     )
 
 
@@ -703,24 +754,80 @@ def generate_requirements_from_iso_standards(
 ) -> RequirementExtractionResponse:
     project = _project_or_404(project_id, session)
     standards = payload.standards or project.standards_scope
-    generated = generate_requirements_from_standards(
-        standards,
-        domain=project.domain,
-        system_type=project.system_type,
-    )
+    existing = _stored_requirements(project_id, session)
+    generated: list[Requirement] = []
+    generation_metadata: dict[str, Any] = {
+        "mode": "template_fallback",
+        "project1_mcp_used": False,
+        "standards": standards,
+    }
+    if payload.use_project1_mcp and settings.project1_mcp_enabled:
+        try:
+            query = standards_gap_query(
+                project.name,
+                project.domain,
+                project.system_type,
+                existing,
+            )
+            mcp_evidence = search_project1_standards(
+                query=query,
+                standards=standards,
+                k_per_standard=4,
+            )
+            generated = generate_grounded_requirements(
+                project_name=project.name,
+                domain=project.domain,
+                system_type=project.system_type,
+                standards=standards,
+                existing_requirements=existing,
+                evidence=mcp_evidence.get("results", []),
+                max_requirements=payload.max_dynamic_requirements,
+            )
+            generation_metadata = {
+                "mode": "project1_mcp_dynamic" if generated else "template_fallback",
+                "project1_mcp_used": True,
+                "mcp_status": mcp_evidence.get("status"),
+                "mcp_result_count": mcp_evidence.get("result_count", 0),
+                "mcp_searches": mcp_evidence.get("searches", []),
+                "standards": standards,
+                "message": (
+                    "Generated project-specific requirement gaps from Project 1 MCP standards evidence."
+                    if generated
+                    else "MCP evidence was retrieved, but no grounded dynamic candidates were produced; templates were used."
+                ),
+            }
+        except Exception as exc:
+            generation_metadata = {
+                "mode": "template_fallback",
+                "project1_mcp_used": False,
+                "standards": standards,
+                "mcp_error": str(exc),
+                "message": "Project 1 MCP was unavailable, so the platform used its offline starter templates.",
+            }
+    if not generated:
+        generated = generate_requirements_from_standards(
+            standards,
+            domain=project.domain,
+            system_type=project.system_type,
+        )
     requirements = generated if payload.replace_existing else _stored_requirements(project_id, session) + generated
     _replace_requirements(project_id, requirements, session)
     summary = quality_summary(generated)
     run = EvaluationRunRecord(
         project_id=project_id,
         run_type="requirements_generate_from_standards",
-        model_used="iso-candidate-template-generator",
+        model_used=(
+            f"project1-mcp+{settings.llm_model}"
+            if generation_metadata.get("mode") == "project1_mcp_dynamic"
+            else "iso-candidate-template-generator"
+        ),
         retrieved_chunk_count=len(generated),
         quality_score=summary.get("average_quality_score", 0.0),
         requirement_quality_summary={
             **summary,
             "standards": standards,
-            "note": "Candidate requirements generated from ISO clause areas; verify against licensed standards before production use.",
+            "generation_metadata": generation_metadata,
+            "note": "Candidate requirements require human review before production or compliance use.",
         },
     )
     session.add(run)
@@ -728,7 +835,11 @@ def generate_requirements_from_iso_standards(
     session.refresh(run)
     log_evaluation_run(run, project)
     _sync_project_neo4j_best_effort(project_id, session)
-    return RequirementExtractionResponse(requirements=generated, quality_summary=summary)
+    return RequirementExtractionResponse(
+        requirements=generated,
+        quality_summary=summary,
+        generation_metadata=generation_metadata,
+    )
 
 
 @app.post("/projects/{project_id}/requirements/evaluate", response_model=RequirementExtractionResponse)
@@ -1503,6 +1614,16 @@ def _delete_project_vector_entries(project_id: int) -> None:
         pass
 
 
+def _delete_project_documents(project_id: int, session: Session) -> None:
+    _delete_project_vector_entries(project_id)
+    for chunk in session.exec(select(DocumentChunk).where(DocumentChunk.project_id == project_id)).all():
+        session.delete(chunk)
+    for document in session.exec(select(ProjectDocument).where(ProjectDocument.project_id == project_id)).all():
+        Path(document.storage_path).unlink(missing_ok=True)
+        session.delete(document)
+    session.commit()
+
+
 def _delete_project_uploads(project_id: int) -> None:
     project_upload_dir = settings.uploads_dir / str(project_id)
     if project_upload_dir.exists():
@@ -1672,6 +1793,86 @@ def _retrieve_project_chunks(project_id: int, question: str):
     ]
 
 
+def _retrieve_project1_mcp_chunks(
+    question: str,
+    standards: list[str],
+    enabled: bool,
+    results_per_standard: int,
+) -> tuple[list[RetrievedChunk], dict[str, Any]]:
+    requested_standards = [standard for standard in standards if standard]
+    metadata: dict[str, Any] = {
+        "requested": enabled,
+        "used": False,
+        "enabled": settings.project1_mcp_enabled,
+        "standards": requested_standards,
+        "searches": [],
+        "error": None,
+    }
+    if not enabled:
+        metadata["status"] = "disabled_by_request"
+        return [], metadata
+    if not settings.project1_mcp_enabled:
+        metadata["status"] = "disabled_by_settings"
+        return [], metadata
+    if not requested_standards:
+        metadata["status"] = "no_standards_selected"
+        return [], metadata
+
+    try:
+        payload = search_project1_standards(
+            query=question,
+            standards=requested_standards,
+            k_per_standard=results_per_standard,
+        )
+    except Exception as exc:
+        metadata["status"] = "error"
+        metadata["error"] = str(exc)
+        return [], metadata
+
+    metadata["status"] = payload.get("status", "unknown")
+    metadata["searches"] = payload.get("searches", [])
+    chunks: list[RetrievedChunk] = []
+    for index, item in enumerate(payload.get("results", []), start=1):
+        item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        standard = (
+            item.get("standard")
+            or item_metadata.get("standard")
+            or item_metadata.get("source_standard")
+            or "Project 1 standard"
+        )
+        clause = item.get("clause") or item_metadata.get("clause") or item_metadata.get("section")
+        page = item.get("page") or item_metadata.get("page")
+        try:
+            page_value = int(page) if page is not None else None
+        except (TypeError, ValueError):
+            page_value = None
+        text = (
+            item.get("text")
+            or item.get("content")
+            or item.get("snippet")
+            or item_metadata.get("text")
+            or item_metadata.get("content")
+            or ""
+        )
+        if not str(text).strip():
+            continue
+        chunks.append(
+            RetrievedChunk(
+                chunk_id=f"project1-mcp-{index}",
+                document=str(standard),
+                page=page_value,
+                section=str(clause) if clause else None,
+                text=str(text),
+                score=item.get("score") if isinstance(item.get("score"), (int, float)) else None,
+                source_type="project1_mcp_standard",
+            )
+        )
+
+    metadata["used"] = bool(chunks)
+    metadata["result_count"] = len(chunks)
+    return chunks, metadata
+
+
 def _answer_from_context(
     question: str,
     chunks,
@@ -1679,7 +1880,11 @@ def _answer_from_context(
     requested_mode: str | None = None,
     requested_model: str | None = None,
 ) -> str:
-    context = "\n\n".join(f"[{chunk.document} p.{chunk.page}] {chunk.text}" for chunk in chunks)
+    context = "\n\n".join(
+        f"[{chunk.source_type}: {chunk.document} p.{chunk.page or '—'}"
+        f"{' section ' + str(chunk.section) if chunk.section else ''}] {chunk.text}"
+        for chunk in chunks
+    )
     mode = _configured_answer_mode(requested_mode)
     model = _configured_answer_model(requested_mode, requested_model)
     if mode == "openai":

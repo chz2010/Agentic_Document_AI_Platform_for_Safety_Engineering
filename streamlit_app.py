@@ -153,10 +153,67 @@ st.markdown(
         border: 1px solid #3a465d;
         border-radius: 12px;
         min-height: 2.55rem;
+        height: auto;
     }
     section[data-testid="stSidebar"] div[data-baseweb="select"] span {
         color: #f5f7fb;
         font-size: 0.95rem;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.35;
+    }
+    div[data-baseweb="popover"] ul[role="listbox"] {
+        width: min(560px, calc(100vw - 2rem)) !important;
+        max-width: min(560px, calc(100vw - 2rem)) !important;
+    }
+    div[data-baseweb="popover"] li[role="option"] {
+        height: auto !important;
+        min-height: 2.8rem;
+        align-items: flex-start !important;
+        padding-top: 0.65rem !important;
+        padding-bottom: 0.65rem !important;
+    }
+    div[data-baseweb="popover"] li[role="option"] span {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.35 !important;
+    }
+    .demo-project-card {
+        border: 1px solid #334058;
+        border-radius: 12px;
+        background: linear-gradient(145deg, #172235, #101827);
+        padding: 0.85rem;
+        margin: 0.55rem 0 0.8rem 0;
+    }
+    .demo-project-eyebrow {
+        color: #7dd3fc;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.08rem;
+        text-transform: uppercase;
+        margin-bottom: 0.3rem;
+    }
+    .demo-project-title {
+        color: #ffffff;
+        font-size: 0.98rem;
+        font-weight: 800;
+        line-height: 1.3;
+        margin-bottom: 0.38rem;
+    }
+    .demo-project-meta {
+        color: #b7c2d3;
+        font-size: 0.78rem;
+        line-height: 1.45;
+    }
+    .demo-project-purpose {
+        color: #dce6f4;
+        font-size: 0.8rem;
+        line-height: 1.45;
+        margin-top: 0.55rem;
+        padding-top: 0.55rem;
+        border-top: 1px solid #334058;
     }
     section[data-testid="stSidebar"] .stButton > button {
         border-radius: 12px;
@@ -473,10 +530,64 @@ def dataframe(rows: list[dict[str, Any]], columns: list[str] | None = None) -> p
     return frame
 
 
+RECRUITER_HIDDEN_OPERATIONS = {"tool_orchestration"}
+
+
+def recruiter_visible_agent_runs(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Hide internal simulator history from the recruiter-facing AgentOps page."""
+    visible = [row for row in rows if row.get("operation_name") not in RECRUITER_HIDDEN_OPERATIONS]
+    return visible, len(rows) - len(visible)
+
+
 def output_tokens_from_usage(token_usage: Any) -> int:
     if not isinstance(token_usage, dict):
         return 0
     return int(token_usage.get("completion_tokens") or token_usage.get("output_tokens") or 0)
+
+
+def agent_ops_summary_from_runs(project_id: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "project_id": project_id,
+            "total_runs": 0,
+            "success_rate": 0.0,
+            "escalation_rate": 0.0,
+            "average_latency_ms": 0.0,
+            "average_cost_usd": 0.0,
+            "total_cost_usd": 0.0,
+            "average_output_tokens": 0.0,
+            "total_output_tokens": 0,
+            "approval_pending_count": 0,
+            "hallucination_flags": {},
+            "average_evaluation_score": None,
+        }
+
+    total = len(rows)
+    success_count = sum(1 for row in rows if row.get("status") in {"resolved", "completed", "success"})
+    escalation_count = sum(1 for row in rows if row.get("human_escalation_required"))
+    latencies = [float(row.get("latency_ms") or 0.0) for row in rows]
+    costs = [float(row.get("estimated_cost_usd") or 0.0) for row in rows]
+    output_tokens = [output_tokens_from_usage(row.get("token_usage")) for row in rows]
+    scores = [float(row.get("evaluation_score")) for row in rows if row.get("evaluation_score") is not None]
+    flags: dict[str, int] = {}
+    for row in rows:
+        for flag in row.get("hallucination_flags") or []:
+            flags[str(flag)] = flags.get(str(flag), 0) + 1
+
+    return {
+        "project_id": project_id,
+        "total_runs": total,
+        "success_rate": round(success_count / total, 3),
+        "escalation_rate": round(escalation_count / total, 3),
+        "average_latency_ms": round(sum(latencies) / total, 2),
+        "average_cost_usd": round(sum(costs) / total, 6),
+        "total_cost_usd": round(sum(costs), 6),
+        "average_output_tokens": round(sum(output_tokens) / total, 2),
+        "total_output_tokens": sum(output_tokens),
+        "approval_pending_count": sum(1 for row in rows if row.get("approval_status") == "pending"),
+        "hallucination_flags": flags,
+        "average_evaluation_score": round(sum(scores) / len(scores), 3) if scores else None,
+    }
 
 
 def grafana_stat(label: str, value: str | int | float, note: str = "") -> None:
@@ -920,6 +1031,67 @@ def project_display_name(project: dict[str, Any], name_counts: dict[str, int]) -
     return name
 
 
+def recruiter_project_name(project: dict[str, Any]) -> str:
+    name = project.get("name") or f"Project {project.get('id')}"
+    friendly_names = {
+        SEED_DEMO_PROJECT_NAME: "AEB & perception safety · Automotive",
+        "LiDAR": "LiDAR perception safety · Automotive",
+        "ETCS Railway Requirements Review Demo": "ETCS requirements review · Railway",
+    }
+    return friendly_names.get(name, name)
+
+
+def recruiter_project_purpose(project: dict[str, Any]) -> str:
+    name = project.get("name") or ""
+    if name == SEED_DEMO_PROJECT_NAME:
+        return "Shows document ingestion, AI-assisted requirements review, traceability, test generation, and human approval."
+    if name == "LiDAR":
+        return "Shows how perception-safety evidence becomes measurable requirements, tests, and review actions."
+    if name == "ETCS Railway Requirements Review Demo":
+        return "Shows how the same automation workflow can be adapted to railway safety requirements."
+    return project.get("description") or "Document automation workspace with searchable evidence and structured review workflows."
+
+
+def recruiter_projects(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return one presentation-ready workspace per scenario instead of test duplicates."""
+    curated_names = {
+        SEED_DEMO_PROJECT_NAME,
+        "LiDAR",
+        "ETCS Railway Requirements Review Demo",
+    }
+    curated = [project for project in projects if project.get("name") in curated_names]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for project in curated:
+        grouped.setdefault(project.get("name") or "", []).append(project)
+
+    selected: list[dict[str, Any]] = []
+    for name, candidates in grouped.items():
+        ordered = sorted(candidates, key=lambda project: project.get("id") or 0)
+        # The tracked seed demo is stable at the earliest ID. Other scenarios use
+        # the newest workspace, which usually contains the most complete run history.
+        selected.append(ordered[0] if name == SEED_DEMO_PROJECT_NAME else ordered[-1])
+
+    if selected:
+        priority = {
+            SEED_DEMO_PROJECT_NAME: 0,
+            "LiDAR": 1,
+            "ETCS Railway Requirements Review Demo": 2,
+        }
+        return sorted(selected, key=lambda project: priority.get(project.get("name") or "", 99))
+
+    # Safe fallback for a fresh installation: collapse repeated names and omit
+    # obvious automated-test workspaces.
+    latest_by_name: dict[str, dict[str, Any]] = {}
+    for project in projects:
+        name = project.get("name") or ""
+        if name in DEMO_TEST_PROJECT_NAMES or name.casefold() == "test":
+            continue
+        current = latest_by_name.get(name)
+        if current is None or (project.get("id") or 0) > (current.get("id") or 0):
+            latest_by_name[name] = project
+    return sorted(latest_by_name.values(), key=lambda project: (project.get("name") or "").casefold())
+
+
 def demo_test_cleanup_candidates(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seed_projects = sorted(
         [project for project in projects if project.get("name") == SEED_DEMO_PROJECT_NAME],
@@ -997,9 +1169,11 @@ def selected_project(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
         key=lambda project: ((project.get("name") or "").casefold(), project.get("id") or 0),
     )
     return st.sidebar.selectbox(
-        "Project",
+        "Choose a project",
         sorted_projects,
         format_func=lambda project: project_display_name(project, name_counts),
+        help="Long project names wrap onto multiple lines so they remain fully readable.",
+        key="project_selector",
     )
 
 
@@ -1120,7 +1294,10 @@ def render_project_sidebar() -> dict[str, Any] | None:
                 selected_profile["standards"],
                 default=selected_profile["default_standards"],
             )
-            description = st.text_area("Description", value=f"{selected_profile['review_lens']} Project workspace for evidence, requirements, traceability, and agent operations.")
+            description = st.text_area(
+                "Description",
+                value=f"{selected_profile['review_lens']} Project workspace for evidence, requirements, traceability, and agent operations.",
+            )
             submitted = st.form_submit_button("Create")
         if submitted:
             api_request(
@@ -1145,12 +1322,28 @@ def render_project_sidebar() -> dict[str, Any] | None:
         return None
     project = selected_project(projects)
     if project:
+        standards = ", ".join(project.get("standards_scope") or [])
+        selected_project_name = project.get("name") or f"Project {project.get('id')}"
+        st.sidebar.markdown(
+            "<div class='demo-project-card'>"
+            "<div class='demo-project-eyebrow'>Selected project</div>"
+            f"<div class='demo-project-title'>{html.escape(selected_project_name)}</div>"
+            f"<div class='demo-project-meta'>{html.escape(project.get('domain') or 'Safety engineering')} · "
+            f"{html.escape(project.get('system_type') or 'Document workflow')}</div>"
+            f"<div class='demo-project-meta'>{html.escape(standards or 'Project-specific standards')}</div>"
+            f"<div class='demo-project-purpose'>{html.escape(recruiter_project_purpose(project))}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         action_cols = st.sidebar.columns([0.82, 0.18])
         if action_cols[0].button("Load seed demo", use_container_width=True):
             create_seed_demo_project()
             st.rerun()
         if action_cols[1].button("⌫", use_container_width=True, help="Open delete confirmation"):
-            st.session_state[f"show_delete_project_{project['id']}"] = not st.session_state.get(f"show_delete_project_{project['id']}", False)
+            st.session_state[f"show_delete_project_{project['id']}"] = not st.session_state.get(
+                f"show_delete_project_{project['id']}",
+                False,
+            )
             st.rerun()
         if st.session_state.get(f"show_delete_project_{project['id']}", False):
             st.caption("This removes the project, documents, runs, requirements, workflow items, and local vector entries.")
@@ -1163,6 +1356,7 @@ def render_project_sidebar() -> dict[str, Any] | None:
                     st.rerun()
                 else:
                     st.error("Project ID confirmation does not match.")
+
         cleanup_candidates = demo_test_cleanup_candidates(projects)
         with st.sidebar.expander("Cleanup demo/test/duplicate projects", expanded=False):
             if not cleanup_candidates:
@@ -1202,7 +1396,9 @@ def render_project_sidebar() -> dict[str, Any] | None:
 def render_overview(project: dict[str, Any]) -> None:
     docs = api_request("GET", f"/projects/{project['id']}/documents")
     runs = api_request("GET", f"/projects/{project['id']}/evaluation-runs")
-    dashboard = api_request("GET", f"/projects/{project['id']}/agent-operations/dashboard")
+    raw_agent_runs = api_request("GET", f"/projects/{project['id']}/agent-runs")
+    agent_runs, hidden_run_count = recruiter_visible_agent_runs(raw_agent_runs)
+    dashboard = agent_ops_summary_from_runs(project["id"], agent_runs)
     traceability = api_request("GET", f"/projects/{project['id']}/traceability")
     requirements_count = len(traceability)
     average_quality = (
@@ -1234,13 +1430,18 @@ def render_overview(project: dict[str, Any]) -> None:
                 grafana_stat(label, value, note)
 
     st.markdown("<div class='grafana-panel-title'>Evaluation trend panels</div>", unsafe_allow_html=True)
-    runs_frame = dataframe(api_request("GET", f"/projects/{project['id']}/agent-runs"))
+    if hidden_run_count:
+        st.caption(
+            f"{hidden_run_count} archived internal simulator run"
+            f"{'s are' if hidden_run_count != 1 else ' is'} hidden from these recruiter-facing charts."
+        )
+    runs_frame = dataframe(agent_runs)
     chart_cols = st.columns(2)
     if runs_frame.empty:
         with chart_cols[0]:
-            st.info("No agent runs yet. Ask a question or run tool orchestration to populate latency and quality panels.")
+            st.info("No agent runs yet. Ask a document question or generate requirements to populate latency and quality panels.")
         with chart_cols[1]:
-            st.info("Evaluation score charts appear after query, extraction, or orchestration runs.")
+            st.info("Evaluation score charts appear after document Q&A, extraction, or requirement-generation runs.")
     else:
         if "created_at" in runs_frame.columns:
             runs_frame["created_at"] = pd.to_datetime(runs_frame["created_at"], errors="coerce")
@@ -1308,6 +1509,11 @@ def render_overview(project: dict[str, Any]) -> None:
 def render_documents(project: dict[str, Any]) -> None:
     st.subheader("Upload Project Documents")
     uploaded = st.file_uploader("PDF, TXT, Markdown, CSV, or DOCX", type=["pdf", "txt", "md", "markdown", "csv", "docx"])
+    replace_existing = st.checkbox(
+        "Replace existing project documents before upload",
+        value=False,
+        help="Use this for clean testing/demo runs. If off, the new document is added to the existing project corpus.",
+    )
     with st.expander("How requirement and traceability links are detected", expanded=False):
         st.markdown(
             """
@@ -1373,9 +1579,13 @@ def render_documents(project: dict[str, Any]) -> None:
         api_request(
             "POST",
             f"/projects/{project['id']}/documents",
+            params={"replace_existing": replace_existing},
             files={"file": (uploaded.name, uploaded.getvalue(), uploaded.type or "application/octet-stream")},
         )
-        st.success("Document uploaded, chunked, embedded, and indexed.")
+        if replace_existing:
+            st.success("Existing project documents were removed. New document uploaded, chunked, embedded, and indexed.")
+        else:
+            st.success("Document uploaded, chunked, embedded, and indexed.")
         st.rerun()
 
     docs = api_request("GET", f"/projects/{project['id']}/documents")
@@ -1458,6 +1668,19 @@ def render_query(project: dict[str, Any]) -> None:
     standard_options = profile.get("standards") or project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"]
     default_standards = project.get("standards_scope") or profile.get("default_standards") or standard_options[:3]
     st.caption(f"Domain profile: {profile['name']} | Review lens: {profile['review_lens']}")
+    try:
+        mcp_response = requests.get(f"{st.session_state.get('api_url', DEFAULT_API_URL).rstrip('/')}/mcp/project1/status", timeout=10)
+        project1_mcp = mcp_response.json() if mcp_response.status_code == 200 else {"connected": False}
+    except requests.RequestException:
+        project1_mcp = {"connected": False}
+    if project1_mcp.get("connected"):
+        databases = project1_mcp.get("databases") or {}
+        st.success(
+            "Project 1 standards MCP connected · "
+            f"{databases.get('standards_chunks', 0):,} standards evidence chunks available."
+        )
+    else:
+        st.info("Project 1 standards MCP is unavailable. Ask/RAG will use uploaded project documents only.")
     question = st.text_area(
         "Question",
         value="Are the requirements complete for occluded pedestrian detection at night?",
@@ -1478,6 +1701,19 @@ def render_query(project: dict[str, Any]) -> None:
         "Answer engine",
         list(answer_engine_options.keys()),
         help="Choose how the final answer is synthesized after project-specific retrieval.",
+    )
+    use_project1_mcp = st.checkbox(
+        "Enrich answer with Project 1 standards MCP",
+        value=bool(project1_mcp.get("connected")),
+        disabled=not bool(project1_mcp.get("connected")),
+        help="Adds standards evidence from Project 1's MCP database to the uploaded document evidence.",
+    )
+    mcp_results_per_standard = st.slider(
+        "Standards evidence per selected standard",
+        min_value=1,
+        max_value=5,
+        value=2,
+        disabled=not use_project1_mcp,
     )
     answer_mode = answer_engine_options[answer_engine]
     answer_model = None
@@ -1506,6 +1742,8 @@ def render_query(project: dict[str, Any]) -> None:
                 "include_requirements_review": include_review,
                 "answer_mode": answer_mode,
                 "answer_model": answer_model,
+                "use_project1_mcp": use_project1_mcp,
+                "project1_mcp_results_per_standard": mcp_results_per_standard,
             },
         )
         st.session_state["last_query_result"] = result
@@ -1514,6 +1752,12 @@ def render_query(project: dict[str, Any]) -> None:
     if result:
         st.markdown("#### Answer")
         st.caption(f"Answer engine: {result.get('answer_mode', 'unknown')} | Model: {result.get('answer_model', 'unknown')}")
+        retrieval_metadata = result.get("retrieval_metadata") or {}
+        st.caption(
+            "Evidence used: "
+            f"{retrieval_metadata.get('project_document_chunk_count', 0)} uploaded document chunk(s), "
+            f"{retrieval_metadata.get('project1_mcp_chunk_count', 0)} Project 1 standards chunk(s)."
+        )
         st.write(result["answer"])
         if result.get("missing_requirements"):
             st.markdown("#### Missing Requirements")
@@ -1524,7 +1768,7 @@ def render_query(project: dict[str, Any]) -> None:
             st.dataframe(dataframe(result["recommended_requirements"]), use_container_width=True, hide_index=True)
         st.markdown("#### Retrieved Evidence")
         st.dataframe(
-            dataframe(result["retrieved_sources"], ["document", "page", "section", "chunk_id", "text"]),
+            dataframe(result["retrieved_sources"], ["source_type", "document", "page", "section", "chunk_id", "text"]),
             use_container_width=True,
             hide_index=True,
         )
@@ -1830,6 +2074,22 @@ def render_iso_reference_table(references: list[dict[str, Any]]) -> None:
 def render_requirements(project: dict[str, Any]) -> None:
     st.subheader("Requirements Engineering")
     profile = project_domain_profile(project)
+    try:
+        api_url = st.session_state.get("api_url", DEFAULT_API_URL).rstrip("/")
+        mcp_response = requests.get(f"{api_url}/mcp/project1/status", timeout=120)
+        project1_mcp = mcp_response.json() if mcp_response.status_code == 200 else {"connected": False}
+    except (requests.RequestException, ValueError):
+        project1_mcp = {"connected": False}
+    if project1_mcp.get("connected"):
+        databases = project1_mcp.get("databases") or {}
+        standards_chunks = (databases.get("standards") or {}).get("chunk_count", 0)
+        st.success(
+            f"Project 1 MCP connected · {standards_chunks:,} standards evidence chunks available for dynamic gap generation."
+        )
+    else:
+        st.warning(
+            "Project 1 MCP is unavailable. Standards generation will use the offline starter templates."
+        )
     standard_options = profile.get("standards") or project.get("standards_scope") or ["ISO 26262", "ISO 21448", "ISO 8800"]
     default_standards = project.get("standards_scope") or profile.get("default_standards") or standard_options[:3]
     stored_traceability = api_request("GET", f"/projects/{project['id']}/traceability")
@@ -1863,11 +2123,22 @@ def render_requirements(project: dict[str, Any]) -> None:
             json={
                 "standards": selected_iso_standards,
                 "replace_existing": replace_iso_requirements,
+                "use_project1_mcp": True,
             },
         )
         st.session_state["quality_review"] = quality_review(st.session_state["requirements_result"].get("requirements", []))
         st.session_state.pop("test_cases", None)
-        st.info("Generated candidate requirements from profile/standard reference areas. Review them against licensed standards before production use.")
+        metadata = st.session_state["requirements_result"].get("generation_metadata") or {}
+        if metadata.get("mode") == "project1_mcp_dynamic":
+            st.success(
+                f"Generated project-specific gaps from {metadata.get('mcp_result_count', 0)} "
+                "standards evidence chunks retrieved through Project 1 MCP."
+            )
+        else:
+            st.info(
+                metadata.get("message")
+                or "Generated offline starter requirements. Review them before production use."
+            )
     if actions[2].button("Generate test cases", use_container_width=True):
         if stored_count == 0:
             st.info("No stored requirements found. Extracting requirements before test-case generation.")
@@ -1888,6 +2159,14 @@ def render_requirements(project: dict[str, Any]) -> None:
     result = st.session_state.get("requirements_result")
     if result:
         summary = result.get("quality_summary", {})
+        generation_metadata = result.get("generation_metadata") or {}
+        if generation_metadata:
+            source_label = (
+                "Project 1 MCP standards evidence"
+                if generation_metadata.get("mode") == "project1_mcp_dynamic"
+                else "Offline standards templates"
+            )
+            st.caption(f"Generation source: {source_label}. Human review remains required.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Requirements", summary.get("count", 0))
         c2.metric("Average quality", summary.get("average_quality_score", 0.0))
@@ -3163,7 +3442,7 @@ def render_graph_chart(nodes: list[dict[str, Any]], edges: list[dict[str, Any]],
 def render_agent_ops(project: dict[str, Any]) -> None:
     st.subheader("Agent Operations")
     source_options = {
-        "All analysis sources": None,
+        "All automation and AI runs": None,
         "Autonomous Driving Safety Analyst": "autonomous_driving_safety_analyst",
         "Agentic Document AI Platform": "agentic_document_ai_platform",
     }
@@ -3171,12 +3450,14 @@ def render_agent_ops(project: dict[str, Any]) -> None:
         "Analysis source",
         list(source_options.keys()),
         index=0,
-        help="Use the first-project source to monitor Safety Analyst query/evidence runs, or the backend source to monitor this platform's orchestration runs.",
+        help="Filter the dashboard by the system that produced each recorded automation or AI run.",
     )
     source_system = source_options[source_label]
     params = {"source_system": source_system} if source_system else None
-    dashboard = api_request("GET", f"/projects/{project['id']}/agent-operations/dashboard", params=params)
-    runs = api_request("GET", f"/projects/{project['id']}/agent-runs", params=params)
+    api_request("GET", f"/projects/{project['id']}/agent-operations/dashboard", params=params)
+    raw_runs = api_request("GET", f"/projects/{project['id']}/agent-runs", params=params)
+    runs, hidden_run_count = recruiter_visible_agent_runs(raw_runs)
+    dashboard = agent_ops_summary_from_runs(project["id"], runs)
     mlflow = api_request("GET", "/mlflow/status")
 
     st.markdown(
@@ -3189,6 +3470,11 @@ def render_agent_ops(project: dict[str, Any]) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
+    if hidden_run_count:
+        st.caption(
+            f"{hidden_run_count} archived internal simulator run"
+            f"{'s are' if hidden_run_count != 1 else ' is'} hidden from this recruiter-facing dashboard."
+        )
 
     st.markdown("<div class='grafana-panel-title'>MLflow tracking</div>", unsafe_allow_html=True)
     mlflow_cols = st.columns(4)
@@ -3203,22 +3489,39 @@ def render_agent_ops(project: dict[str, Any]) -> None:
     st.markdown("<div class='grafana-panel-title'>Evaluation health</div>", unsafe_allow_html=True)
     cols = st.columns(6)
     with cols[0]:
-        grafana_stat("Success rate", f"{dashboard['success_rate']:.0%}", "Resolved runs")
+        grafana_stat("Total runs", dashboard["total_runs"], "Runs in this selection")
     with cols[1]:
-        grafana_stat("Escalation rate", f"{dashboard['escalation_rate']:.0%}", "Human review load")
+        grafana_stat("Success rate", f"{dashboard['success_rate']:.0%}", "Resolved runs")
     with cols[2]:
-        grafana_stat("Avg latency", f"{dashboard['average_latency_ms']:.0f} ms", "Run response time")
+        grafana_stat("Escalation rate", f"{dashboard['escalation_rate']:.0%}", "Human review load")
     with cols[3]:
-        grafana_stat("Avg cost", f"${dashboard['average_cost_usd']:.4f}", "Estimated per run")
+        grafana_stat("Avg latency", f"{dashboard['average_latency_ms']:.0f} ms", "Run response time")
     with cols[4]:
-        grafana_stat("Avg output tokens", f"{dashboard.get('average_output_tokens', 0):.0f}", "Generated answer size")
+        grafana_stat("Total cost", f"${dashboard['total_cost_usd']:.6f}", "Sum across selected runs")
     with cols[5]:
         grafana_stat("Pending approvals", dashboard["approval_pending_count"], "Approval gate queue")
+
+    volume_cols = st.columns(4)
+    with volume_cols[0]:
+        grafana_stat("Avg cost / run", f"${dashboard['average_cost_usd']:.6f}", "Can fall when low-cost runs are included")
+    with volume_cols[1]:
+        grafana_stat("Total output tokens", dashboard.get("total_output_tokens", 0), "Sum across selected runs")
+    with volume_cols[2]:
+        grafana_stat("Avg output tokens", f"{dashboard.get('average_output_tokens', 0):.0f}", "Generated answer size per run")
+    with volume_cols[3]:
+        average_score = dashboard.get("average_evaluation_score")
+        grafana_stat(
+            "Avg evaluation score",
+            f"{average_score:.3f}" if average_score is not None else "—",
+            "Quality across scored runs",
+        )
 
     st.markdown("<div class='grafana-panel-title'>Evaluation panels</div>", unsafe_allow_html=True)
     runs_frame = dataframe(runs)
     if runs_frame.empty:
-        st.info("No agent runs yet. Run tool orchestration to populate the operations dashboard.")
+        st.info(
+            "No recorded runs yet. Ask a question, generate requirements, or complete another AI workflow to populate this dashboard."
+        )
     else:
         if "token_usage" in runs_frame.columns:
             runs_frame["output_tokens"] = runs_frame["token_usage"].apply(output_tokens_from_usage)
@@ -3404,38 +3707,11 @@ def render_agent_ops(project: dict[str, Any]) -> None:
                 y_title="Run ID",
             )
 
-    if source_system in {None, "agentic_document_ai_platform"}:
-        st.markdown("<div class='grafana-panel-title'>Backend orchestration simulator</div>", unsafe_allow_html=True)
-        with st.form("agent_tool_run"):
-            request = st.text_area("Agent request", value="Review low-confidence requirements and create a ticket if human review is needed.")
-            confidence = st.slider("Confidence score", 0.0, 1.0, 0.72, 0.01)
-            risk = st.selectbox("Hallucination risk", ["low", "medium", "high", "critical"], index=2)
-            submitted = st.form_submit_button("Run tool orchestration")
-        if submitted:
-            st.session_state["tool_result"] = api_request(
-                "POST",
-                f"/projects/{project['id']}/agent-tools/run",
-                json={
-                    "user_request": request,
-                    "confidence_score": confidence,
-                    "hallucination_risk": risk,
-                    "tools": [
-                        "search_project_docs",
-                        "evaluate_requirements",
-                        "generate_traceability",
-                        "generate_test_cases",
-                        "create_issue_ticket",
-                    ],
-                },
-            )
-            st.rerun()
-    else:
-        st.info("To create first-project analysis runs, use the Ask tab. Those query runs appear here with output-token tracking.")
-
-    if st.session_state.get("tool_result"):
-        render_orchestration_result(st.session_state["tool_result"])
-
-    st.markdown("#### Run Logs")
+    st.markdown("#### Recorded Run Logs")
+    st.caption(
+        "This page is read-only. Runs are created automatically by document questions, requirements generation, "
+        "MCP-backed analysis, and other workflows elsewhere in the platform."
+    )
     run_log_frame = dataframe(runs)
     if not run_log_frame.empty:
         run_log_frame["output_tokens"] = run_log_frame.get("token_usage", pd.Series(dtype=object)).apply(output_tokens_from_usage)
