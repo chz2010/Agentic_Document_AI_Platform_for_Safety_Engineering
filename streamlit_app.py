@@ -530,6 +530,25 @@ def dataframe(rows: list[dict[str, Any]], columns: list[str] | None = None) -> p
     return frame
 
 
+def format_berlin_timestamp(value: Any) -> str:
+    """Display persisted UTC timestamps in the user's Berlin local time."""
+    timestamp = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        return ""
+    return timestamp.tz_convert("Europe/Berlin").strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def with_berlin_created_at(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy API rows and convert their UTC ``created_at`` field for the UI."""
+    return [
+        {
+            **row,
+            "created_at": format_berlin_timestamp(row.get("created_at")),
+        }
+        for row in rows
+    ]
+
+
 RECRUITER_HIDDEN_OPERATIONS = {"tool_orchestration"}
 
 
@@ -1499,7 +1518,7 @@ def render_overview(project: dict[str, Any]) -> None:
 
     st.markdown("<div class='grafana-panel-title'>Project documents</div>", unsafe_allow_html=True)
     wrapped_table(
-        dataframe(docs, ["id", "filename", "source_type", "chunk_count", "created_at"]),
+        dataframe(with_berlin_created_at(docs), ["id", "filename", "source_type", "chunk_count", "created_at"]),
         ["id", "filename", "source_type", "chunk_count", "created_at"],
         labels={"id": "ID", "filename": "Document", "source_type": "Type", "chunk_count": "Chunks", "created_at": "Created"},
         widths={"id": "col-id", "filename": "col-text", "source_type": "col-small", "chunk_count": "col-small", "created_at": "col-medium"},
@@ -1591,7 +1610,7 @@ def render_documents(project: dict[str, Any]) -> None:
     docs = api_request("GET", f"/projects/{project['id']}/documents")
     st.markdown("<div class='grafana-panel-title'>Indexed documents</div>", unsafe_allow_html=True)
     wrapped_table(
-        dataframe(docs, ["id", "filename", "source_type", "chunk_count", "created_at"]),
+        dataframe(with_berlin_created_at(docs), ["id", "filename", "source_type", "chunk_count", "created_at"]),
         ["id", "filename", "source_type", "chunk_count", "created_at"],
         labels={"id": "ID", "filename": "Document", "source_type": "Type", "chunk_count": "Chunks", "created_at": "Created"},
         widths={"id": "col-id", "filename": "col-text", "source_type": "col-small", "chunk_count": "col-small", "created_at": "col-medium"},
@@ -1622,7 +1641,7 @@ def render_documents(project: dict[str, Any]) -> None:
         st.warning("No chunks were stored for this document.")
         return
 
-    chunk_rows = [
+    chunk_rows = with_berlin_created_at([
         {
             "chunk_id": chunk["chunk_id"],
             "page": chunk.get("page") or "—",
@@ -1631,7 +1650,7 @@ def render_documents(project: dict[str, Any]) -> None:
             "created_at": chunk.get("created_at"),
         }
         for chunk in chunks
-    ]
+    ])
     wrapped_table(
         chunk_rows,
         ["chunk_id", "page", "section", "text_preview", "created_at"],

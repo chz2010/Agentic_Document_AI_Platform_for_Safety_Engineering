@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 .backend-venv/
 .pytest_cache/
@@ -9,3 +11,5 @@ __pycache__/
 data/
 vectordb/
 outputs/
+download_dataset/
+images/

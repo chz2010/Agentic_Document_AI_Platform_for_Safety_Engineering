@@ -9,11 +9,65 @@ structured Pydantic outputs, PostgreSQL, requirements engineering,
 traceability, evaluation history, agent operations logging, internal workflow
 tooling, mock external integrations, and Docker Compose.
 
+## Recruiter Snapshot
+
+| Area | Evidence |
+| --- | --- |
+| Engineering problem | Turn fragmented safety documents into reviewable requirements, traceability, tests, and evidence-backed answers. |
+| System design | FastAPI services, Streamlit workspace, PostgreSQL, Chroma retrieval, optional Neo4j and MLflow, and MCP-based standards enrichment. |
+| Agent safety | Structured Pydantic outputs, evidence provenance, approval metadata, escalation paths, and auditable AgentOps records. |
+| Validation | API, requirements-engineering, and seed-dataset tests plus stored evaluation history and exportable reports. |
+| Delivery status | Recruiter-demo MVP; external GitHub, Jira, and Slack actions are deliberately mocked, while Gmail intake is a restricted demo connector. |
+
+![Agentic Document AI workflow](docs/image.png)
+
 The current Streamlit demo is designed as a recruiter-friendly MVP: users
 select a project, upload or replace project documents, ask evidence-grounded
 questions, extract and score requirements, build traceability/test outputs, and
 monitor AI workflow behavior in AgentOps. GitHub, Jira, and Slack integrations
 are mock/local workflow records in this prototype, not live external API calls.
+
+## Controlled Gmail Demo Connector
+
+`scripts/gmail_demo_connector.py` demonstrates how an external communications
+channel can call the existing Project 2 conversation, intent, and workflow APIs.
+It is deliberately restricted to a test sender and a `[DEMO]` subject prefix;
+it never sends email or creates Gmail labels.
+
+Add these values to `.env` without committing them:
+
+```bash
+GMAIL_IMAP_EMAIL=your-test-account@gmail.com
+GMAIL_IMAP_APP_PASSWORD=your_16_character_google_app_password
+GMAIL_ALLOWED_SENDER=your-test-account@gmail.com
+GMAIL_SUBJECT_PREFIX=[DEMO]
+PROJECT2_API_BASE_URL=http://127.0.0.1:8000
+PROJECT2_DEMO_PROJECT_ID=1
+```
+
+Start the FastAPI backend, then send a test email from the allowed address with
+a subject such as `[DEMO] Please create a ticket for this request`.
+
+```bash
+python scripts/gmail_demo_connector.py
+python scripts/gmail_demo_connector.py --execute --mark-seen
+```
+
+The first command is a dry run. The second creates a Project 2 conversation,
+detects intent, creates a workflow item and AgentOps record, then marks only
+that successfully processed demo email as read.
+
+To demonstrate document intake from email, attach a small `.md` file to the
+same controlled test email and use the explicit attachment-processing flag:
+
+```bash
+python scripts/gmail_demo_connector.py --execute --process-markdown-attachments --mark-seen
+```
+
+This uploads only `.md` or `.markdown` attachments below 256 KB, runs the
+existing requirement-extraction and quality-evaluation endpoints, and reports
+the resulting document and requirement counts. It adds the attachment to the
+selected Project 2 workspace, so use a dedicated demo project.
 
 ## Portfolio Description
 
