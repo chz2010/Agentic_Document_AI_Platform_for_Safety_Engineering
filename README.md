@@ -110,6 +110,8 @@ flowchart LR
     class M1D,M2D,M3D,M4D milestoneDetail;
 ```
 
+M3 is the working local [Perception Safety Evaluation Copilot](https://github.com/chz2010/Perception_Safety_Evaluation_Copilot) portfolio MVP. M4 remains the planned cross-project workflow integration.
+
 ## System Architecture
 
 ```mermaid
